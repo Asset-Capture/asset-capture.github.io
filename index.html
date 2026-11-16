@@ -441,6 +441,7 @@ function renderList(){
   const waiting = records.filter(r=>r._pending).length;
   if (waiting) sum.append(el("button",{type:"button",class:"chip warn",style:"border:0;min-height:32px",text:waiting+" waiting to sync. Tap to try now",onclick:()=>doSync(true)}));
   sum.append(el("span",{class:"chip",text:"Saved on this phone"}));
+  if (installEvt && !isInstalled()) sum.append(el("button",{type:"button",class:"chip ai",style:"border:0;min-height:32px",text:"Install app",onclick:doInstall}));
   getPack().then(p => { if (!p && !$("lists-warn")) sum.append(el("button",{type:"button",id:"lists-warn",class:"chip warn",style:"border:0;min-height:32px",text:"Lists not loaded. Tap to set up",onclick:openHelp})); });
   if (!records.length) {
     list.append(el("div",{class:"empty"}, el("h2",{text:"Start with the first asset"}),
@@ -1013,6 +1014,29 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
+const APP_VERSION = "17 Nov 2026, build 2";
+let installEvt = null;
+const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
+window.addEventListener("appinstalled", () => { installEvt = null; if (!$("view-list").hidden) renderList(); toast("Installed. Open it from your home screen from now on."); });
+async function doInstall(){ if (!installEvt) return openHelp(); const e = installEvt; e.prompt(); try { await e.userChoice; } catch(x) {} }
+function installCard(){
+  const ua = navigator.userAgent, ios = /iPhone|iPad|iPod/.test(ua), card = el("div",{class:"opt"}, el("h3",{text:"2. Install on this phone"}));
+  if (isInstalled()) card.append(el("p",{text:"Installed. You are using the installed app."}));
+  else if (installEvt) card.append(el("p",{text:"Puts the app on your home screen. It then opens full screen, with or without signal."}), el("button",{type:"button",class:"btn primary block",text:"Install app",onclick:doInstall}));
+  else {
+    card.append(el("ol",{class:"steps"}, ...(ios ? [
+        el("li",{text:"This must be done in Safari. If you opened the link from another app, choose Open in Safari first."}),
+        el("li",{text:"Tap the Share button (the square with an arrow pointing up) at the bottom of Safari."}),
+        el("li",{text:"Scroll down the list and tap Add to Home Screen, then Add."})]
+      : [
+        el("li",{text:"This must be done in Chrome. If you opened the link from another app (email, Teams, a chat), tap the three dots and choose Open in Chrome first."}),
+        el("li",{text:"In Chrome tap the three dots at the top right."}),
+        el("li",{text:"Tap Add to Home screen, then Install. On a computer, use the install icon at the right of the address bar."})])),
+      el("button",{type:"button",class:"btn block",text:"Copy the app's address",onclick:async()=>{ try { await navigator.clipboard.writeText(location.href.split("#")[0]); toast("Address copied. Paste it into "+(ios?"Safari":"Chrome")+"."); } catch(x) { toast(location.href); } }}));
+  }
+  return card;
+}
 function openHelp(){
   openSheet("Setup", async body => {
     const p = await getPack();
@@ -1021,8 +1045,7 @@ function openHelp(){
       el("div",{class:"opt"}, el("h3",{text:"1. Lists file"}),
         el("p",{text: p ? "Loaded: "+(p.specs||[]).length.toLocaleString()+" specifications, "+(p.locations||[]).length.toLocaleString()+" locations, "+(p.types||[]).length+" asset types."+(p.version?" Source: "+p.version+".":"") : "Not loaded. The searchable specifications, locations, organisations, cost codes and asset types come from the file pmbh-lists.json. Save it to this phone, then load it here. It stays on the phone."}),
         el("button",{type:"button",class:"btn block"+(p?"":" primary"),text:p?"Replace the lists file":"Load the lists file",onclick:()=>$("in-lists").click()})),
-      el("div",{class:"opt"}, el("h3",{text:"2. Add to the home screen"}),
-        el("p",{text:"In the browser menu choose Add to Home Screen (iPhone: Share, then Add to Home Screen). The app then opens like any other app, with or without signal, and the phone keeps its data."})),
+      installCard(),
       el("div",{class:"opt"}, el("h3",{text:"3. Online OCR (optional)"}),
         el("p",{text:"The on-phone reader needs nothing. Online OCR is stronger on worn or stamped plates. It sends the photo to OCR.space, a third-party service, so check that is acceptable for your site. It needs a free API key from ocr.space/ocrapi/freekey."}),
         key,
@@ -1033,7 +1056,8 @@ function openHelp(){
         el("ol",{class:"steps"},
           el("li",{text:"Tap Export Excel, then choose OneDrive in the share screen and pick Asset Validation › PMBH › Asset Update Data load. It syncs to the same folder on your computer."}),
           el("li",{text:"Open the export, copy the rows under the header on the first sheet, and paste them into row 2 of triBuildingEquipment Data in the .xlsm template."}),
-          el("li",{text:"Press Ctrl-Shift-V to validate, then continue the data load as usual."}))));
+          el("li",{text:"Press Ctrl-Shift-V to validate, then continue the data load as usual."}))),
+      el("div",{class:"note",text:"Version "+APP_VERSION+". Updates arrive by themselves the next time the app is opened with signal. Nothing needs reinstalling."}));
   });
 }
 
