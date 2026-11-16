@@ -800,10 +800,11 @@ async function readDevice(){
   }
 }
 
-/* --- reader 2: Online OCR (OCR.space). The photo is sent to that service; needs a connection and a free API key. --- */
+/* --- reader 2: Online OCR (Google Gemini). The photo is sent to Google; needs a connection and a Google AI Studio key kept on this phone. --- */
 const onlineKey = () => { try { return (localStorage.getItem("pmbh-ocrkey")||"").trim(); } catch(e) { return ""; } };
+const GAPI = "https://generativelanguage.googleapis.com/v1beta/";
 async function shrinkFor(blob, maxBytes){
-  const bmp = await createImageBitmap(blob); let side = 2200, q = .85, out = blob;
+  const bmp = await createImageBitmap(blob); let side = 2400, q = .88, out = blob;
   for (let i=0;i<7;i++) {
     const k = Math.min(1, side/Math.max(bmp.width,bmp.height)), c = document.createElement("canvas");
     c.width = Math.round(bmp.width*k); c.height = Math.round(bmp.height*k); c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
@@ -813,6 +814,57 @@ async function shrinkFor(blob, maxBytes){
   }
   return out;
 }
+const toB64 = blob => new Promise((res,rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1]); fr.onerror = rej; fr.readAsDataURL(blob); });
+// Model names change over time, so ask the service which fast vision model this key can use and remember it for the day.
+async function pickModel(signal){
+  try { const c = JSON.parse(localStorage.getItem("pmbh-ocrmodel")||"null"); if (c && c.day===today() && c.name) return c.name; } catch(e) {}
+  let name = "gemini-flash-latest";
+  try {
+    const r = await fetch(GAPI+"models?pageSize=200",{headers:{"x-goog-api-key":onlineKey()},signal});
+    if (r.status===400 || r.status===401 || r.status===403) throw {code:"key"};
+    if (r.ok) {
+      const ms = ((await r.json()).models||[]).filter(m => (m.supportedGenerationMethods||[]).includes("generateContent")).map(m => String(m.name).replace(/^models\//,""));
+      const ver = n => parseFloat((/gemini-(\d+(?:\.\d+)?)/.exec(n)||[])[1]||"0");
+      const stable = ms.filter(n => /^gemini-\d+(\.\d+)?-flash$/.test(n)).sort((a,b)=>ver(b)-ver(a));
+      const anyFlash = ms.filter(n => /^gemini-[\d.]+-flash/.test(n) && !/lite|image|tts|live|audio|native|thinking/.test(n)).sort((a,b)=>ver(b)-ver(a));
+      name = stable[0] || (ms.includes("gemini-flash-latest") ? "gemini-flash-latest" : anyFlash[0]) || name;
+    }
+  } catch(e) { if (e && (e.code==="key" || e.name==="AbortError")) throw e; }
+  try { localStorage.setItem("pmbh-ocrmodel", JSON.stringify({day:today(), name})); } catch(e) {}
+  return name;
+}
+const promptFor = (nFull, types) => `You are reading photos taken during an asset validation at an Australian public hospital (NSW Health). The assets are building and facility plant (air handling units, fan coil units, chillers, split systems, pumps, boilers, hot water units, thermostatic mixing valves, switchboards and distribution boards, generators, UPS, fire panels, extinguishers, hose reels, lifts, medical gas plant, kitchen and laundry equipment) and some medical equipment (patient scales, beds, patient lifters, sterilisers, examination tables).
+
+There are ${nFull} photo(s) of one asset.
+They show a manufacturer's nameplate, rating plate or type label, and may also show a hospital asset tag, a barcode sticker or a local asset label.
+
+How these plates are laid out:
+- Model may be labelled MODEL, MOD, MODEL NO, M/N, TYPE, TYP, CAT NO, PART NO, or by the boxed symbol REF. Serial may be labelled SERIAL, SER NO, S/N, SN, S.No, MFG NO, F.No, Fabr.Nr, or by the boxed symbol SN. On medical device labels a factory icon marks the manufacturer and a factory icon with a date marks the date of manufacture. LOT is a batch, not a serial.
+- The make is the brand of the whole unit. It is often only a logo, sometimes lower case (seca), sometimes embossed in the casing rather than on the plate. It is never the importer, Australian sponsor or distributor, a certification mark (CE, RCM, UL, SAI Global, TUV, WaterMark, a standard number), or the maker of a component.
+- Pumps and fans often carry two plates: one for the motor (WEG, ABB, TECO, Siemens, CMG) and one for the pump or fan itself (Grundfos, Lowara, Wilo, Fantech). When both are visible, report the pump or fan plate and mention the motor in "details".
+- A product number printed beside the logo (seca 813, Rheem 613270) is the model.
+- Stamped or engraved metal plates are low contrast. Tell 0 from O, 1 from I, 5 from S, 8 from B, 2 from Z and 6 from G by context: serial numbers are mostly digits, and other characters on the same plate show the typeface. Never complete or correct a character you cannot see. If any character of a value is uncertain, give your best reading and name that key in "unclear".
+- Dates: accept MFG DATE, DATE OF MANUFACTURE, DOM, YEAR, BUILT, PROD, in forms like 06/2019, 2019-06 or 2019. Do not take a date from a serial number, a standard number (AS/NZS 3350:2002), an electrical test tag or a warranty sticker.
+- GS1 or UDI text under a barcode: (01) is the product code, (11) the production date as YYMMDD, (21) the serial number, (10) the lot.
+- Fire extinguishers have no model number: use "2.5kg - Powder ABE", "4.5kg - Powder ABE", "9.0kg - Powder ABE", "3.5kg - Co2", "5.0kg - Co2", "9L - Water", "9L - Foam" or "7L - Wet Chemical". For a fire door use its rating as the model, for example "FRL -/120/30".
+- A hospital asset tag is a small sticker or engraved tag with a barcode or an ID such as PMB.A.2.00123. Its number goes in "barcode" or "asset_id", never in "serial". An electrical test-and-tag label is neither.
+- A local label fixed to the asset such as CH-1, FCU 2, DB20 or Pump 1 is the "asset_label".
+
+Reply with only one JSON object with these keys. Use "" for anything not printed or not legible.
+"make": the manufacturer, in the capitalisation the manufacturer uses
+"model": exactly as printed
+"serial": exactly as printed, with its hyphens and slashes, without the label word
+"manufacture_date": YYYY-MM-DD; day 01 when only month and year are printed, 01-01 when only the year
+"asset_type": exactly one entry copied from the asset type list below that describes this equipment; "" if none fits or you cannot tell
+"asset_label": the local label, if visible
+"capacity": the one defining capacity, energy source or utility type that would help someone identify the asset, such as "5000L", "Natural Gas", "250kg", "7.1kW cooling"; "" if nothing stands out
+"barcode": the asset barcode number, if visible
+"asset_id": the asset ID on a tag, if different from the barcode
+"details": other rating data in one line (refrigerant and charge, voltage, phase, current, kW, pressure, IP rating, motor make)
+"unclear": array of the keys above whose value you could not read with confidence
+"photo_issue": "" when the plate is readable; otherwise one short sentence telling the photographer what to fix, such as glare over the serial number, too far away, blurred, plate cut off
+
+Asset type list: ${types.join("; ")}`;
 async function readOnline(){
   if (!cur || !cur.photos.length) return;
   if (!onlineOk()) return openHelp();
@@ -821,38 +873,36 @@ async function readOnline(){
   const ctl = aiCtl = new AbortController(), forKey = cur.key;
   setAi({busy:true,msg:"Online OCR is reading the plate…",stop:true});
   try {
-    const dict = await getDict();
-    const blobs = (await Promise.all(cur.photos.slice(-2).map(p=>Store.photoBlob(p)))).filter(Boolean);
+    const blobs = (await Promise.all(cur.photos.slice(-3).map(p=>Store.photoBlob(p)))).filter(Boolean);
     if (!blobs.length) throw {code:"photo"};
-    const merged = {unclear:[]}, texts = [];
-    for (const b of blobs) {
-      const fd = new FormData();
-      fd.append("apikey", onlineKey()); fd.append("language","eng"); fd.append("isOverlayRequired","true"); fd.append("OCREngine","2");
-      fd.append("scale","true"); fd.append("detectOrientation","true"); fd.append("file", await shrinkFor(b, 950000), "plate.jpg");
-      const r = await fetch("https://api.ocr.space/parse/image",{method:"POST",body:fd,signal:ctl.signal});
-      if (r.status===401 || r.status===403) throw {code:"key"};
-      if (!r.ok) throw {code:"http"};
-      const j = await r.json();
-      if (j.IsErroredOnProcessing) { const m = [].concat(j.ErrorMessage||"").join(" "); throw {code:/key/i.test(m)?"key":"api", message:m}; }
-      const words = [];
-      for (const pr of j.ParsedResults||[]) for (const l of (pr.TextOverlay && pr.TextOverlay.Lines)||[]) for (const w of l.Words||[])
-        words.push({t:String(w.WordText), c:90, x0:w.Left, y0:w.Top, x1:w.Left+w.Width, y1:w.Top+w.Height});
-      const res = parsePlate(words, dict);
-      if (res.text) texts.push(res.text);
-      for (const k of ["make","model","serial","manufacture_date","details"]) if (!merged[k] && res[k]) { merged[k] = res[k]; if (res.unclear.includes(k)) merged.unclear.push(k); }
-    }
-    merged.barcode = await detectBarcode(blobs);
+    const [T, model] = await Promise.all([loadList("types"), pickModel(ctl.signal)]);
+    const parts = [{text:promptFor(blobs.length, T.raw)}];
+    for (const b of blobs) parts.push({inline_data:{mime_type:"image/jpeg", data:await toB64(await shrinkFor(b, 3500000))}});
+    const call = async m => fetch(GAPI+"models/"+m+":generateContent",{method:"POST",signal:ctl.signal,headers:{"Content-Type":"application/json","x-goog-api-key":onlineKey()},
+      body:JSON.stringify({contents:[{role:"user",parts}],generationConfig:{temperature:0,responseMimeType:"application/json"}})});
+    let r = await call(model);
+    if (r.status===404 && model!=="gemini-flash-latest") { try { localStorage.removeItem("pmbh-ocrmodel"); } catch(e) {} r = await call("gemini-flash-latest"); }
+    if (!r.ok) { let m = ""; try { m = ((await r.json()).error||{}).message||""; } catch(e) {}
+      throw {code: r.status===429 ? "quota" : (r.status===401 || r.status===403 || /api key/i.test(m)) ? "key" : "api", message:m}; }
+    const j = await r.json();
+    const txt = (((j.candidates||[])[0]||{}).content||{}).parts ? j.candidates[0].content.parts.map(p=>p.text||"").join("") : "";
+    let out = null; try { out = JSON.parse(txt); } catch(e) { const m = /\{[\s\S]*\}/.exec(txt); if (m) { try { out = JSON.parse(m[0]); } catch(x) {} } }
+    if (Array.isArray(out)) out = out[0];
+    if (!out || typeof out!=="object") throw {code:"api", message:"The reply could not be understood."};
     if (!cur || cur.key!==forKey) return;
-    $("rawpre").textContent = texts.join("\n\n"); $("rawtext").hidden = !texts.length;
-    const got = await applyRead(merged, forKey); if (!got) return;
-    const un = (merged.unclear.includes("make") ? " The make is a guess." : "")+(merged.unclear.includes("model") ? " The model was matched to the closest one already in AFM." : "");
-    setAi({retry:true, bad:!got.length, msg: got.length ? "Online OCR read "+got.join(", ")+"."+un+" Check each against the plate. Choose the asset type yourself."
-      : (texts.length ? "Text was found but no make, model or serial could be picked out. Open the text below, or retake the photo closer and square on." : "No text could be read. Retake the photo closer, square on and out of glare.")});
+    if (!out.barcode) out.barcode = await detectBarcode(blobs);
+    $("rawtext").hidden = true;
+    const got = await applyRead(out, forKey); if (!got) return;
+    const unclear = Array.isArray(out.unclear) ? out.unclear.filter(k => typeof k==="string" && KEYMAP[k] && typeof out[k]==="string" && out[k].trim()).map(k=>F[KEYMAP[k]].label.toLowerCase().replace(/,.*$/,"")) : [];
+    const issue = typeof out.photo_issue==="string" ? out.photo_issue.trim() : "";
+    setAi({retry:true, bad:!got.length, msg: got.length ? "Online OCR read "+got.join(", ")+"."+(unclear.length?" Not confident about: "+unclear.join(", ")+".":"")+(issue?" "+issue:"")+" Check each against the plate."
+      : (issue || "Nothing legible was found.")+" Retake the photo closer and square on, or type the details."});
   } catch(e) {
     if (!cur || cur.key!==forKey) return;
     const code = e && e.code;
     if (e && e.name==="AbortError") return setAi({msg:"Stopped. Type the details or read again.",retry:true});
-    setAi({bad:true,retry:true,msg: code==="key" ? "The Online OCR key was not accepted. Check it in Setup." : code==="api" ? "Online OCR could not process the photo"+(e.message?": "+e.message.slice(0,120):".")+" Use the on-phone reader or type the details."
+    setAi({bad:true,retry:true,msg: code==="key" ? "The Online OCR key was not accepted. Check it in Setup." : code==="quota" ? "Online OCR has reached its free limit for now. Wait a minute, or use the on-phone reader."
+      : code==="api" ? "Online OCR could not process the photo"+(e.message?": "+String(e.message).slice(0,140):".")+" Use the on-phone reader or type the details."
       : "Online OCR could not be reached. Use the on-phone reader, or try again when the signal is better."});
   } finally { if (aiCtl===ctl) aiCtl = null; }
 }
@@ -1017,7 +1067,7 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
-const APP_VERSION = "17 Nov 2026, build 3";
+const APP_VERSION = "17 Nov 2026, build 4";
 let installEvt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
@@ -1051,16 +1101,16 @@ function installCard(){
 function openHelp(){
   openSheet("Setup", async body => {
     const p = await getPack();
-    const key = el("input",{type:"text",id:"ocr-key",placeholder:"Paste your OCR.space API key",autocomplete:"off",autocapitalize:"off",spellcheck:"false",style:"width:100%;min-height:48px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg)"}); key.value = onlineKey();
+    const key = el("input",{type:"text",id:"ocr-key",placeholder:"Paste your Google AI Studio API key",autocomplete:"off",autocapitalize:"off",spellcheck:"false",style:"width:100%;min-height:48px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg)"}); key.value = onlineKey();
     body.append(
       el("div",{class:"opt"}, el("h3",{text:"1. Lists file"}),
         el("p",{text: p ? "Loaded: "+(p.specs||[]).length.toLocaleString()+" specifications, "+(p.locations||[]).length.toLocaleString()+" locations, "+(p.types||[]).length+" asset types."+(p.version?" Source: "+p.version+".":"") : "Not loaded. The searchable specifications, locations, organisations, cost codes and asset types come from the file pmbh-lists.json. Save it to this phone, then load it here. It stays on the phone."}),
         el("button",{type:"button",class:"btn block"+(p?"":" primary"),text:p?"Replace the lists file":"Load the lists file",onclick:()=>$("in-lists").click()})),
       installCard(),
       el("div",{class:"opt"}, el("h3",{text:"3. Online OCR (optional)"}),
-        el("p",{text:"The on-phone reader needs nothing. Online OCR is stronger on worn or stamped plates. It sends the photo to OCR.space, a third-party service, so check that is acceptable for your site. It needs a free API key from ocr.space/ocrapi/freekey."}),
+        el("p",{text: onlineKey() ? "Set up on this phone. Online OCR is stronger on worn or stamped plates and also suggests the asset type. It sends the photo to Google (Gemini), so check that is acceptable for your site." : "The on-phone reader needs nothing. Online OCR is stronger on worn or stamped plates and also suggests the asset type. It sends the photo to Google (Gemini), so check that is acceptable for your site. It needs an API key from Google AI Studio (aistudio.google.com)."}),
         key,
-        el("button",{type:"button",class:"btn block",text:"Save key",onclick:()=>{ try { localStorage.setItem("pmbh-ocrkey", key.value.trim()); } catch(e) {} if (!key.value.trim() && reader==="online") reader = "device"; renderReader(); toast(key.value.trim() ? "Online OCR key saved on this phone." : "Online OCR key removed."); }})),
+        el("button",{type:"button",class:"btn block",text:"Save key",onclick:()=>{ try { localStorage.setItem("pmbh-ocrkey", key.value.trim()); localStorage.removeItem("pmbh-ocrmodel"); } catch(e) {} if (!key.value.trim() && reader==="online") reader = "device"; renderReader(); toast(key.value.trim() ? "Online OCR key saved on this phone." : "Online OCR key removed."); }})),
       el("div",{class:"opt"}, el("h3",{text:"Where your work is kept"}),
         el("p",{text:"Assets and photos are stored on this phone only, inside this app. Nothing is uploaded unless you use Online OCR or share an export. Export at the end of each day: clearing the browser's site data, or removing the app, deletes them."})),
       el("div",{class:"opt"}, el("h3",{text:"Getting the Excel into OneDrive"}),
@@ -1104,6 +1154,9 @@ async function doSync(say){
 window.addEventListener("online", () => doSync(false));
 (async function start(){
   $("summary").append(el("span",{class:"chip",text:"Opening your asset list…"}));
+  const hk = /[#&]key=([^&]+)/.exec(location.hash);
+  if (hk) { try { localStorage.setItem("pmbh-ocrkey", decodeURIComponent(hk[1])); localStorage.setItem("pmbh-reader","online"); localStorage.removeItem("pmbh-ocrmodel"); reader = "online"; } catch(e) {}
+    history.replaceState(null, "", location.pathname + location.search); setTimeout(() => toast("Online OCR is set up on this phone."), 800); }
   Store.ready = Store.init();
   for (const n of Object.keys(SRC)) loadList(n);
   renderReader();
