@@ -44,7 +44,10 @@
 html,body{margin:0}
 body{background:var(--bg);color:var(--ink);font:400 16px/1.45 var(--body);-webkit-text-size-adjust:100%}
 button,input,select,textarea{font:inherit;color:inherit}
-button{cursor:pointer}
+button{cursor:pointer;-webkit-tap-highlight-color:transparent;transition:filter .1s,transform .08s,background-color .15s,border-color .15s}
+button:active:not(:disabled){filter:brightness(.86);transform:scale(.97)}
+.btn.good,.btn.good:disabled{background:var(--good);border-color:var(--good);color:#fff;opacity:1}
+@media (prefers-reduced-motion: reduce){button{transition:none}button:active:not(:disabled){transform:none}}
 :focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 [hidden]{display:none!important}
 .wrap{max-width:640px;margin:0 auto;padding:0 16px}
@@ -1014,15 +1017,23 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
-const APP_VERSION = "17 Nov 2026, build 2";
+const APP_VERSION = "17 Nov 2026, build 3";
 let installEvt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
 window.addEventListener("appinstalled", () => { installEvt = null; if (!$("view-list").hidden) renderList(); toast("Installed. Open it from your home screen from now on."); });
-async function doInstall(){ if (!installEvt) return openHelp(); const e = installEvt; e.prompt(); try { await e.userChoice; } catch(x) {} }
+async function doInstall(ev){
+  if (!installEvt) return openHelp();
+  const btn = ev && ev.currentTarget, label = btn && btn.textContent, e = installEvt;
+  if (btn) { btn.disabled = true; btn.textContent = "Opening the install prompt…"; }
+  let ok = false; try { e.prompt(); ok = (await e.userChoice).outcome === "accepted"; } catch(x) {}
+  if (!btn) return;
+  if (ok) { installEvt = null; btn.classList.remove("primary","ai"); btn.classList.add("good"); btn.textContent = "Installed ✓ Open it from your home screen"; if (btn.classList.contains("chip")) btn.remove(); }
+  else { btn.disabled = false; btn.textContent = label; toast("Not installed. Tap Install app to try again."); }
+}
 function installCard(){
   const ua = navigator.userAgent, ios = /iPhone|iPad|iPod/.test(ua), card = el("div",{class:"opt"}, el("h3",{text:"2. Install on this phone"}));
-  if (isInstalled()) card.append(el("p",{text:"Installed. You are using the installed app."}));
+  if (isInstalled()) card.append(el("div",{}, el("span",{class:"chip good",text:"Installed ✓"})), el("p",{text:"You are using the installed app."}));
   else if (installEvt) card.append(el("p",{text:"Puts the app on your home screen. It then opens full screen, with or without signal."}), el("button",{type:"button",class:"btn primary block",text:"Install app",onclick:doInstall}));
   else {
     card.append(el("ol",{class:"steps"}, ...(ios ? [
