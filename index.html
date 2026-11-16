@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PMBH Asset Capture</title>
+<meta name="theme-color" content="#17303d">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>
+/* Layout idea: a plant-room clipboard. One column, big touch targets, a rating-plate
+   header band, and a sticky action bar the thumb can always reach. */
+:root{
+  --bg:#eef1f3; --surface:#ffffff; --sunk:#e3e8ec; --ink:#14232d; --muted:#566772;
+  --line:#cdd6dc; --plate:#17303d; --plate-ink:#f2f6f8;
+  --accent:#e08a00; --accent-ink:#1c1300; --accent-soft:#fff1d6;
+  --good:#1f7a4d; --good-soft:#dff3e8; --warn:#a35a00; --warn-soft:#ffe9c7; --bad:#b3261e; --bad-soft:#fde3e1;
+  --ai:#0b6b8a; --ai-soft:#dff2f8;
+  --display:"Arial Narrow","Roboto Condensed","Helvetica Neue",system-ui,sans-serif;
+  --body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --r:12px;
+  --s1:#1f7a4d; --s2:#5b8f2a; --s3:#a67c00; --s4:#c05a12; --s5:#b3261e; --s0:#6b7a84;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0f181d; --surface:#18242b; --sunk:#111b21; --ink:#e8eef1; --muted:#9bacb6;
+    --line:#2c3c46; --plate:#0a1317; --plate-ink:#e8eef1;
+    --accent:#f5a623; --accent-ink:#1c1300; --accent-soft:#3a2b0c;
+    --good:#58c48c; --good-soft:#133224; --warn:#f0b35a; --warn-soft:#3a2b0c; --bad:#ff8a80; --bad-soft:#3d1a18;
+    --ai:#6cc7e3; --ai-soft:#0f303b;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0f181d; --surface:#18242b; --sunk:#111b21; --ink:#e8eef1; --muted:#9bacb6;
+  --line:#2c3c46; --plate:#0a1317; --plate-ink:#e8eef1;
+  --accent:#f5a623; --accent-ink:#1c1300; --accent-soft:#3a2b0c;
+  --good:#58c48c; --good-soft:#133224; --warn:#f0b35a; --warn-soft:#3a2b0c; --bad:#ff8a80; --bad-soft:#3d1a18;
+  --ai:#6cc7e3; --ai-soft:#0f303b;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:400 16px/1.45 var(--body);-webkit-text-size-adjust:100%}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+.wrap{max-width:640px;margin:0 auto;padding:0 16px}
+h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;letter-spacing:.01em}
+
+/* header band */
+.plate{background:var(--plate);color:var(--plate-ink)}
+.plate .wrap{display:flex;align-items:center;gap:12px;padding-top:14px;padding-bottom:14px}
+.plate h1{font-size:26px;line-height:1.05;text-transform:uppercase}
+.plate p{margin:2px 0 0;font-size:13px;opacity:.8}
+.plate .grow{flex:1;min-width:0}
+.rivet{width:10px;height:10px;border-radius:50%;background:var(--accent);flex:none}
+.plate button{background:transparent;border:1px solid rgba(255,255,255,.35);color:inherit;border-radius:999px;padding:8px 14px;min-height:40px}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:10px 18px;border-radius:var(--r);border:1px solid var(--line);background:var(--surface);font-weight:600}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+.btn.block{width:100%}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.big{min-height:60px;font-size:18px}
+
+/* list view */
+.summary{display:flex;gap:8px;flex-wrap:wrap;padding:14px 0 6px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;background:var(--sunk);color:var(--muted)}
+.chip.good{background:var(--good-soft);color:var(--good)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}
+.chip.ai{background:var(--ai-soft);color:var(--ai)}
+.cards{display:flex;flex-direction:column;gap:10px;padding:8px 0 120px}
+.card{display:flex;gap:12px;align-items:stretch;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px;text-align:left;width:100%}
+.card .thumb{width:72px;height:72px;border-radius:8px;background:var(--sunk);object-fit:cover;flex:none;display:grid;place-items:center;color:var(--muted);font-size:12px}
+.card .meta{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.card .name{font-weight:600;overflow-wrap:anywhere}
+.card .sub{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.card .num{font-family:var(--display);font-size:20px;color:var(--muted);font-variant-numeric:tabular-nums;align-self:center}
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:var(--r);padding:18px;margin-top:8px}
+.empty h2{font-size:22px;margin-bottom:8px}
+.empty ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:10px 0 14px;z-index:5}
+.bar .wrap{display:flex;gap:10px}
+.bar .btn{flex:1}
+.note{font-size:13px;color:var(--muted)}
+.banner{border-radius:var(--r);padding:10px 12px;margin-top:12px;font-size:14px;background:var(--warn-soft);color:var(--warn)}
+.banner.bad{background:var(--bad-soft);color:var(--bad)}
+
+/* edit view */
+.photos{display:flex;gap:8px;overflow-x:auto;padding:2px 0 6px}
+.photo{position:relative;flex:none}
+.photo img{width:112px;height:112px;object-fit:cover;border-radius:10px;border:1px solid var(--line);display:block;background:var(--sunk)}
+.photo button{position:absolute;top:4px;right:4px;width:32px;height:32px;border-radius:50%;border:0;background:rgba(0,0,0,.65);color:#fff;font-size:18px;line-height:1}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.aistatus{display:flex;flex-wrap:wrap;align-items:center;gap:10px;border-radius:var(--r);padding:10px 12px;background:var(--ai-soft);color:var(--ai);font-size:14px;margin-top:10px}
+.aistatus.bad{background:var(--bad-soft);color:var(--bad)}
+.aistatus .grow{flex:1;min-width:60%}
+.aistatus button{border:1px solid currentColor;background:transparent;color:inherit;border-radius:999px;padding:6px 12px;min-height:36px;font-weight:600}
+.spin{width:16px;height:16px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:sp .8s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.spin{animation:none}}
+section.grp{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);margin-top:12px}
+section.grp>details>summary{list-style:none;display:flex;align-items:center;gap:8px;padding:12px 14px;font-family:var(--display);font-size:20px;text-transform:uppercase;cursor:pointer}
+section.grp>details>summary::-webkit-details-marker{display:none}
+section.grp>details>summary::after{content:"+";margin-left:auto;font-size:22px;color:var(--muted)}
+section.grp>details[open]>summary::after{content:"–"}
+section.grp .count{font:600 12px var(--body);color:var(--muted);text-transform:none}
+.fields{display:flex;flex-direction:column;gap:12px;padding:0 14px 14px}
+.f label,.f .lab{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:4px}
+.f .req{color:var(--bad)}
+.f input,.f select,.f textarea,.pick{width:100%;min-height:48px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg)}
+.f textarea{min-height:84px;resize:vertical}
+.f.ai input{border-color:var(--ai);background:var(--ai-soft)}
+.pick{display:flex;align-items:center;gap:8px;text-align:left;overflow-wrap:anywhere}
+.pick .val{flex:1;min-width:0}
+.pick .ph{color:var(--muted)}
+.pick .go{color:var(--muted);flex:none}
+.sugg{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.sugg button{text-align:left;border:1px solid var(--ai);background:var(--ai-soft);color:var(--ink);border-radius:10px;padding:8px 10px;min-height:44px;overflow-wrap:anywhere}
+.sugg .cap{font-size:12px;font-weight:600;color:var(--ai)}
+.editpad{padding-bottom:120px}
+.opts{display:flex;flex-wrap:wrap;gap:8px}
+.optb{display:inline-flex;align-items:center;gap:8px;min-height:48px;padding:8px 14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);font-weight:500;text-align:left}
+.optb[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);font-weight:600;box-shadow:inset 0 0 0 1px var(--accent)}
+.optb .dot{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font:600 13px var(--body);color:#fff;flex:none}
+.optb svg{width:22px;height:22px;flex:none;color:var(--muted)}
+.optb[aria-pressed="true"] svg{color:var(--accent)}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:12px 6px;border:1px solid var(--line);border-radius:12px;background:var(--bg);font-size:13px;font-weight:600;text-align:center;min-height:92px}
+.tile svg{width:28px;height:28px;color:var(--accent)}
+.tile small{font-weight:400;color:var(--muted)}
+.linkb{border:0;background:transparent;color:var(--ai);font-weight:600;padding:8px 0;min-height:40px;text-decoration:underline;text-align:left}
+.reader{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}
+.reader .lab{font-size:13px;font-weight:600;color:var(--muted)}
+.rawtext{margin-top:8px;font-size:13px}
+.rawtext pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--sunk);border-radius:10px;padding:10px;margin:6px 0 0;font:13px/1.45 ui-monospace,Menlo,Consolas,monospace;user-select:text;-webkit-user-select:text}
+.zoom{overflow:auto;max-height:70vh;border-radius:10px;background:var(--sunk)}
+.zoom img{display:block;width:100%}
+.zoom.in img{width:300%;max-width:none}
+
+/* sheets */
+.scrim{position:fixed;inset:0;background:rgba(8,14,18,.55);z-index:20;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--surface);width:100%;max-width:640px;max-height:92%;border-radius:18px 18px 0 0;display:flex;flex-direction:column;overflow:hidden}
+.sheet header{display:flex;align-items:center;gap:10px;padding:14px 16px 8px}
+.sheet header h2{font-size:22px;text-transform:uppercase;flex:1}
+.sheet .x{border:0;background:var(--sunk);width:40px;height:40px;border-radius:50%;font-size:20px}
+.sheet .body{padding:4px 16px 18px;overflow:auto;display:flex;flex-direction:column;gap:12px}
+.sheet input[type=search]{width:100%;min-height:48px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg)}
+.results{display:flex;flex-direction:column}
+.results button{text-align:left;background:transparent;border:0;border-bottom:1px solid var(--line);padding:12px 2px;min-height:48px;overflow-wrap:anywhere}
+.results button small{display:block;color:var(--muted);font-size:12px}
+.results .free{color:var(--ai);font-weight:600}
+.opt{border:1px solid var(--line);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:8px}
+.opt h3{font-size:19px;text-transform:uppercase}
+.opt p{margin:0;font-size:14px;color:var(--muted)}
+.tree{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--sunk);border-radius:10px;padding:10px;overflow-x:auto;white-space:pre;margin:0}
+.steps{margin:0;padding-left:20px;font-size:14px;display:flex;flex-direction:column;gap:6px}
+.toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:var(--plate);color:var(--plate-ink);padding:10px 16px;border-radius:999px;font-size:14px;z-index:40;max-width:90%;text-align:center}
+</style>
+</head>
+<body>
+
+<div id="view-list">
+  <div class="plate"><div class="wrap">
+    <span class="rivet" aria-hidden="true"></span>
+    <div class="grow"><h1>PMBH Asset Capture</h1><p>Building equipment update for the AFMO data load</p></div>
+    <button type="button" id="btn-help">Setup</button>
+  </div></div>
+  <main class="wrap">
+    <div id="banner" class="banner" hidden></div>
+    <div class="summary" id="summary"></div>
+    <div id="list" class="cards"></div>
+  </main>
+  <div class="bar"><div class="wrap">
+    <button type="button" class="btn" id="btn-export">Export Excel</button>
+    <button type="button" class="btn primary" id="btn-add">Add asset</button>
+  </div></div>
+</div>
+
+<div id="view-edit" hidden>
+  <div class="plate"><div class="wrap">
+    <button type="button" id="btn-back">Back</button>
+    <div class="grow"><h1 id="edit-title">New asset</h1><p id="edit-sub"></p></div>
+  </div></div>
+  <main class="wrap editpad">
+    <section class="grp" style="padding:14px">
+      <div class="lab" style="font-family:var(--display);font-size:20px;text-transform:uppercase;margin-bottom:8px">Photos</div>
+      <div class="photos" id="photos"></div>
+      <div class="row2">
+        <button type="button" class="btn primary" id="btn-cam">Take photo</button>
+        <button type="button" class="btn" id="btn-gal">Choose photo</button>
+      </div>
+      <input type="file" id="in-cam" accept="image/*" capture="environment" hidden>
+      <input type="file" id="in-gal" accept="image/*" multiple hidden>
+      <input type="file" id="in-lists" accept=".json,application/json" hidden>
+      <p class="note" style="margin:8px 0 0">Fill the frame with the nameplate, square on and out of glare. Add the barcode sticker as a second photo. Tap a photo to zoom in.</p>
+      <div class="reader" id="reader"></div>
+      <div id="aistatus" hidden></div>
+      <details class="rawtext" id="rawtext" hidden><summary>Text found on the plate</summary><pre id="rawpre"></pre></details>
+    </section>
+    <div id="form"></div>
+    <button type="button" class="btn danger block" id="btn-delete" style="margin-top:16px" hidden>Delete this asset</button>
+  </main>
+  <div class="bar"><div class="wrap">
+    <button type="button" class="btn" id="btn-cancel">Cancel</button>
+    <button type="button" class="btn primary" id="btn-save">Save asset</button>
+  </div></div>
+</div>
+
+<div id="sheets"></div>
+<div id="toast" class="toast" hidden role="status"></div>
+
+<script src="lib/xlsx.full.min.js"></script>
+<script src="lib/jszip.min.js"></script>
+<script>
+"use strict";
+/* ---------- template definition (column order of "triBuildingEquipment Data") ---------- */
+const HEADERS = ["CSTDCRECORDIDTX","TRIIDTX","TRINAMETX","TRISERIALNUMTX","TRIBARCODEENTRYTX","TRIPRIMARYORGANIZATI","CSTOPERATORTX","TRIPRIMARYLOCATIONTX","CSTEQUIPMENTPOSITIONTX","CSTFIXEDORMOBILELI","TRISPECNAMETX","TRIBUILDINGSYSTEMCL","CSTASSETOWNERSHIPSTATU","CSTASSETOWNERSHIPTYPEC","TRIACTIVESTARTDA","CSTMANUFACTUREDATEDA","CSTWARRANTYSTARTDATEDA","CSTWARRANTYEXPIRESDA","TRIPONUMTX","TRIPURCHASECOSTNU","CSTSUPPLIERTX","TRILIFEEXPECTANCYDU","CSTASSETCRITICALITYLI","CSTOPERATINGENVIRONMEN","CSTASSETUTILISATIONLI","TRICONDITIONLI","CSTCONDITIONDA","CSTCONDITIONASSESSMENT","TRICURRENTREPLACEMEN","CSTMAINTENANCETYPELI","TRIMAINTENANCEPRIORI","CSTMAINTENANCESTRATEGY","CSTSERVICEAGENTTX","CSTDCPARENTRECORDIDTX","MARK_TO_IGNORE_FOR_UPLOAD","VALIDATION_ERRORS"];
+const OWN = ["Borrowed","Consumables Lease","Donated","Government Grant","Leased","Not Owned","Owned","Purchased","Rented"];
+// k = key in a saved asset, col = column in the data sheet (absent = capture log only)
+const F = {
+  id:{label:"Asset ID",col:"TRIIDTX",type:"text",max:700,hint:"The existing AFMO asset number"},
+  atype:{label:"Asset type",type:"pick",src:"types"},
+  area:{label:"Service area",type:"text",hint:"Ward, department or block, e.g. ICU, West Block"},
+  label:{label:"Asset label",type:"text",hint:"The local label on the asset, e.g. FCU2, Chiller 1, DB20"},
+  cap:{label:"Capacity, energy source or utility type",type:"text",hint:"e.g. 5000L, Natural Gas, Essential Power, 250kg"},
+  name:{label:"Name",col:"TRINAMETX",type:"text",max:150,req:true,hint:"Built as asset type - service area - asset label - capacity, following the HI naming guide. The brand is not part of the name."},
+  serial:{label:"Serial number",col:"TRISERIALNUMTX",type:"text",max:700},
+  barcode:{label:"Bar code",col:"TRIBARCODEENTRYTX",type:"text",max:700},
+  make:{label:"Make",type:"text"},
+  model:{label:"Model",type:"text"},
+  spec:{label:"Specification name",col:"TRISPECNAMETX",type:"pick",src:"specs",req:true,max:150},
+  cls:{label:"Building system class",col:"TRIBUILDINGSYSTEMCL",type:"pick",src:"classes"},
+  mfgDate:{label:"Manufacture date",col:"CSTMANUFACTUREDATEDA",type:"date"},
+  location:{label:"Primary location",col:"TRIPRIMARYLOCATIONTX",type:"pick",src:"locations"},
+  position:{label:"Equipment position",col:"CSTEQUIPMENTPOSITIONTX",type:"text",max:250,hint:"e.g. plant room north wall, roof above theatre 2"},
+  fixed:{label:"Fixed or mobile?",col:"CSTFIXEDORMOBILELI",type:"select",opts:["Fixed","Mobile"],icons:["fixed","mobile"]},
+  org:{label:"Organization",col:"TRIPRIMARYORGANIZATI",type:"pick",src:"orgs"},
+  operator:{label:"Operator (cost code)",col:"CSTOPERATORTX",type:"pick",src:"costcodes"},
+  ownStatus:{label:"Ownership status",col:"CSTASSETOWNERSHIPSTATU",type:"select",opts:OWN},
+  ownType:{label:"Ownership type",col:"CSTASSETOWNERSHIPTYPEC",type:"select",opts:OWN},
+  inService:{label:"In service date",col:"TRIACTIVESTARTDA",type:"date"},
+  warrStart:{label:"Warranty start date",col:"CSTWARRANTYSTARTDATEDA",type:"date"},
+  warrEnd:{label:"Warranty expiration date",col:"CSTWARRANTYEXPIRESDA",type:"date"},
+  po:{label:"PO number",col:"TRIPONUMTX",type:"text",max:700},
+  cost:{label:"Purchase cost",col:"TRIPURCHASECOSTNU",type:"number"},
+  supplier:{label:"Supplier",col:"CSTSUPPLIERTX",type:"text",max:150},
+  life:{label:"Life expectancy",col:"TRILIFEEXPECTANCYDU",type:"text"},
+  criticality:{label:"Asset criticality",col:"CSTASSETCRITICALITYLI",type:"select",opts:["1 - Low","2 - Medium","3 - High","4 - Extreme"],scale:[1,3,4,5]},
+  env:{label:"Operating environment",col:"CSTOPERATINGENVIRONMEN",type:"select",opts:["1 - Good","2 - Normal","3 - Poor"],scale:[1,3,5]},
+  util:{label:"Asset utilisation",col:"CSTASSETUTILISATIONLI",type:"select",opts:["1 - Low","2 - Normal","3 - High"],scale:[0,0,0]},
+  condition:{label:"Asset condition",col:"TRICONDITIONLI",type:"select",opts:["1 - Excellent","2 - Good","3 - Fair","4 - Poor","5 - Defective"],scale:[1,2,3,4,5]},
+  assessDate:{label:"Assessment date",col:"CSTCONDITIONDA",type:"date"},
+  comments:{label:"Condition assessment comments",col:"CSTCONDITIONASSESSMENT",type:"textarea",max:1000},
+  replValue:{label:"Replacement value",col:"TRICURRENTREPLACEMEN",type:"number"},
+  maintType:{label:"Maintenance type",col:"CSTMAINTENANCETYPELI",type:"select",opts:["Non Statutory","Statutory"]},
+  maintPriority:{label:"Maintenance priority",col:"TRIMAINTENANCEPRIORI",type:"select",opts:["Contract Change","Emergency","High","Low","Medium","New Lease","Update Lease","Urgent"]},
+  maintStrategy:{label:"Maintenance strategy",col:"CSTMAINTENANCESTRATEGY",type:"select",opts:["Condition","Preventative Maintenance","Run to Fail"]},
+  agent:{label:"Service agent",col:"CSTSERVICEAGENTTX",type:"text",max:150},
+  notes:{label:"Other nameplate details",type:"textarea",hint:"Kept in the capture log sheet, not in the data load"},
+};
+const GROUPS = [
+  {t:"Identity and name",open:true,f:["id","barcode","atype","area","label","cap","name"]},
+  {t:"Make, model and serial",open:true,f:["make","model","serial","spec","cls","mfgDate","notes"]},
+  {t:"Location",open:true,f:["location","position","fixed","org","operator"]},
+  {t:"Condition",f:["condition","criticality","env","util","assessDate","comments","life","replValue"]},
+  {t:"Ownership and dates",f:["ownStatus","ownType","inService","warrStart","warrEnd"]},
+  {t:"Purchase",f:["po","cost","supplier"]},
+  {t:"Maintenance",f:["maintType","maintPriority","maintStrategy","agent"]},
+];
+const STICKY = ["location","area","org","operator","ownStatus","ownType","agent"];
+const NAMEPARTS = ["atype","area","label","cap"];
+const buildName = r => String(r.atype||"").trim() ? NAMEPARTS.map(k=>String(r[k]||"").trim()).filter(Boolean).join(" - ").slice(0,150) : "";
+const SVG = d => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+d+'</svg>';
+const ICON = {
+  fixed:SVG('<path d="M12 21s6-6 6-11a6 6 0 0 0-12 0c0 5 6 11 6 11z"/><circle cx="12" cy="10" r="2"/>'),
+  mobile:SVG('<path d="M3 5h3l3 10h10"/><path d="M8 11h11l-1-5H7"/><circle cx="10.5" cy="19" r="1.6"/><circle cx="18" cy="19" r="1.6"/>'),
+  "Fire":SVG('<path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-4 2-5 0 2 1 3 2 3 0-3-1-5 1-8z"/>'),
+  "Mechanical":SVG('<circle cx="12" cy="12" r="1.8"/><path d="M12 10c0-4 1-6 3-6s2 3-1 6"/><path d="M14 12c4 0 6 1 6 3s-3 2-6-1"/><path d="M12 14c0 4-1 6-3 6s-2-3 1-6"/><path d="M10 12c-4 0-6-1-6-3s3-2 6 1"/>'),
+  "Hydraulics":SVG('<path d="M12 3c3 4 6 7 6 11a6 6 0 0 1-12 0c0-4 3-7 6-11z"/>'),
+  "Electrical":SVG('<path d="M13 2L5 14h6l-1 8 8-12h-6z"/>'),
+  "Medical":SVG('<path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6z"/>'),
+  "Lifts":SVG('<path d="M5 3h14v18H5z"/><path d="M9 10l3-3 3 3"/><path d="M9 14l3 3 3-3"/>'),
+  "Controls":SVG('<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>'),
+  "Kitchen":SVG('<path d="M7 3v18M5 3v5a2 2 0 0 0 4 0V3"/><path d="M16 21v-9c-2-2-2-7 0-9v9"/>'),
+  "Furniture and equipment":SVG('<path d="M7 13V4h10v9"/><path d="M5 13h14v3H5z"/><path d="M7 16v5M17 16v5"/>'),
+  "Security":SVG('<path d="M6 11h12v10H6z"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
+  "Communications":SVG('<path d="M12 12v9M8 21h8"/><path d="M8.5 9a3.5 3.5 0 0 1 7 0"/><path d="M5 9a7 7 0 0 1 14 0"/><circle cx="12" cy="10.5" r="1.3"/>'),
+  "Grounds and structure":SVG('<path d="M12 3l5 7h-3l4 6H6l4-6H7z"/><path d="M12 16v5"/>'),
+  "Vehicles":SVG('<path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7z"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17.5" cy="17.5" r="1.8"/>'),
+};
+const SRC = {
+  specs:{file:"specs.json",title:"Specification",strip:"",ph:"Search make, model or type"},
+  locations:{file:"locations.json",title:"Primary location",strip:"\\Locations\\",ph:"Search building, level or room"},
+  orgs:{file:"orgs.json",title:"Organization",strip:"\\Organizations\\",ph:"Search department"},
+  costcodes:{file:"costcodes.json",title:"Operator (cost code)",strip:"",ph:"Search cost code"},
+  classes:{file:"classes.json",title:"Building system class",strip:"",ph:"Search class"},
+  types:{file:"assettypes.json",title:"Asset type",strip:"",ph:"Search asset type, e.g. scales, chiller, pump",free:"Not in the Asset Data Standard's asset type list."},
+};
+
+/* ---------- tiny helpers ---------- */
+const $ = id => document.getElementById(id);
+const el = (tag, attrs={}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k,v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "class") n.className = v; else if (k === "text") n.textContent = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null) n.append(k);
+  return n;
+};
+const today = () => { const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+const newKey = () => "a_" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+let toastTimer;
+function toast(msg){ const t=$("toast"); t.textContent=msg; t.hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.hidden=true, 3800); }
+const timeout = (p, ms) => Promise.race([p, new Promise((_,rej)=>setTimeout(()=>rej({code:"timeout"}), ms))]);
+
+/* ---------- lookup lists ---------- */
+const lists = {};
+let packP = null;
+function getPack(){
+  return packP || (packP = (async () => {
+    await Store.ready;
+    let p = await Store.getKV("lists");
+    if (!p) { try { const r = await fetch("lists/pmbh-lists.json"); if (r.ok) { p = await r.json(); await Store.setKV("lists", p); } } catch(e) {} }
+    return p || null;
+  })());
+}
+function loadList(name){
+  if (!lists[name]) lists[name] = getPack().then(p => { const a = p && p[name]; if (!Array.isArray(a) || !a.length) throw 0;
+      const raw = a.map(x => typeof x==="string" ? x : x.t); return {raw, up:raw.map(t => t.toUpperCase()), meta:typeof a[0]==="object" ? a : null}; })
+    .catch(() => { lists[name] = null; return {raw:[], up:[], failed:true}; });
+  return lists[name];
+}
+async function importLists(file){
+  let p; try { p = JSON.parse(await file.text()); } catch(e) { return toast("That file is not a lists file."); }
+  if (!p || !Array.isArray(p.specs) || !Array.isArray(p.locations)) return toast("That file is not a lists file.");
+  await Store.setKV("lists", p); packP = null; dictP = null; for (const k of Object.keys(lists)) delete lists[k];
+  $("sheets").replaceChildren(); renderList(); toast("Lists loaded: "+p.specs.length.toLocaleString()+" specifications, "+p.locations.length.toLocaleString()+" locations.");
+}
+const tokens = s => String(s||"").toUpperCase().split(/[^A-Z0-9.\-\/]+/).filter(Boolean);
+function searchList(L, q, limit=60){
+  const tk = tokens(q); if (!tk.length) return [];
+  const out = [];
+  for (let i=0;i<L.up.length;i++){ const u=L.up[i]; let ok=true; for (const t of tk) if (!u.includes(t)) { ok=false; break; } if (ok) out.push(i); }
+  out.sort((a,b)=>L.up[a].length-L.up[b].length);
+  return out.slice(0,limit).map(i=>L.raw[i]);
+}
+function suggestSpecs(L, make, model, type){
+  const mk = tokens(make)[0], md = String(model||"").toUpperCase().trim(), mdc = md.replace(/[\s\-]/g,""), tt = tokens(type).filter(t=>t.length>2).slice(0,3);
+  if (!mk && md.length<2) return [];
+  const scored = [];
+  for (let i=0;i<L.up.length;i++){
+    const u = L.up[i]; let s = 0;
+    if (md.length>=5 ? (u.includes(md) || u.replace(/[\s\-]/g,"").includes(mdc)) : (md.length>=2 && u.split(/[^A-Z0-9]+/).includes(md))) s += 6;
+    if (mk && mk.length>=2 && u.includes(mk)) s += 3;
+    if (s) { for (const t of tt) if (u.includes(t.replace(/S$/,""))) s += 1; scored.push([s,i]); }
+  }
+  scored.sort((a,b)=>b[0]-a[0] || L.up[a[1]].length-L.up[b[1]].length);
+  const top = scored.slice(0,6);
+  // make-only matches are too loose to be useful unless the type agrees as well
+  specExact = !!top.length && top[0][0]>=6;
+  return top.filter(([s]) => s>=6 || (s>=4 && !specExact)).slice(0,5).map(([,i])=>L.raw[i]);
+}
+
+/* ---------- storage: everything stays on this phone (IndexedDB) ---------- */
+const Store = {
+  mode:"local", assets:null, idb:null, mem:new Map(), kv:new Map(), blobs:new Map(), cloudDown:false, ready:null,
+  async init(){
+    try { this.idb = await new Promise((res,rej)=>{ const r = indexedDB.open("pmbh-capture",2);
+      r.onupgradeneeded = () => { const d = r.result; if (!d.objectStoreNames.contains("records")) d.createObjectStore("records",{keyPath:"key"}); if (!d.objectStoreNames.contains("photos")) d.createObjectStore("photos"); if (!d.objectStoreNames.contains("kv")) d.createObjectStore("kv"); };
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); } catch(e) { this.idb = null; }
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e) {}
+  },
+  tx(store, mode, fn){ return new Promise((res,rej)=>{ const t=this.idb.transaction(store,mode); const rq=fn(t.objectStore(store)); t.oncomplete=()=>res(rq&&rq.result); t.onerror=()=>rej(t.error); }); },
+  online(){ return navigator.onLine !== false; },
+  async getKV(k){ if (this.idb) { try { return await this.tx("kv","readonly",st=>st.get(k)); } catch(e) {} } return this.kv.get(k); },
+  async setKV(k, v){ this.kv.set(k, v); if (this.idb) { try { await this.tx("kv","readwrite",st=>st.put(v,k)); } catch(e) {} } },
+  async list(){ return this.idb ? await this.tx("records","readonly",st=>st.getAll()) : [...this.mem.values()]; },
+  async put(rec){
+    const clean = JSON.parse(JSON.stringify(rec));
+    if (this.idb) await this.tx("records","readwrite",st=>st.put(clean)); else this.mem.set(rec.key, clean);
+    return clean;
+  },
+  async syncPending(){ return []; },
+  async del(key){ if (this.idb) return await this.tx("records","readwrite",st=>st.delete(key)); this.mem.delete(key); },
+  pkey(p){ return p.id ? "c:"+p.id : "l:"+p.local; },
+  async addPhoto(blob){
+    let p = null;
+    if (this.assets && this.online()) { try { const r = await timeout(this.assets.upload(blob,{type:"image/jpeg"}), 25000); p = {id:r.id}; } catch(e) {} }
+    if (!p) { const k = newKey(); if (this.idb) { try { await this.tx("photos","readwrite",s=>s.put(blob,k)); } catch(e) {} } p = {local:k}; }
+    this.blobs.set(this.pkey(p), blob);
+    return p;
+  },
+  async photoBlob(p){
+    const k = this.pkey(p); if (this.blobs.has(k)) return this.blobs.get(k);
+    let b = null;
+    if (p.id) { try { const r = await fetch("/_blob/"+p.id); if (r.ok) b = await r.blob(); } catch(e) {}
+      if (!b) b = await new Promise(res=>{ const im=new Image(); im.onload=()=>{ const c=document.createElement("canvas"); c.width=im.naturalWidth; c.height=im.naturalHeight; c.getContext("2d").drawImage(im,0,0); c.toBlob(res,"image/jpeg",.9); }; im.onerror=()=>res(null); im.src="/_blob/"+p.id; }); }
+    else if (this.idb) { try { b = await this.tx("photos","readonly",s=>s.get(p.local)); } catch(e) {} }
+    if (b) this.blobs.set(k,b);
+    return b || null;
+  },
+  urls:new Map(),
+  async photoUrl(p){
+    const k = this.pkey(p);
+    if (!this.blobs.has(k) && p.id) return "/_blob/"+p.id;
+    if (this.urls.has(k)) return this.urls.get(k);
+    const b = await this.photoBlob(p); if (!b) return "";
+    const u = URL.createObjectURL(b); this.urls.set(k,u); return u;
+  },
+  async delPhoto(p){
+    this.blobs.delete(this.pkey(p));
+    if (p.id && this.assets) { try { await this.assets.delete(p.id); } catch(e) {} }
+    else if (p.local && this.idb) { try { await this.tx("photos","readwrite",s=>s.delete(p.local)); } catch(e) {} }
+  },
+};
+
+/* ---------- state ---------- */
+let specExact = false;
+let records = [], cur = null, curIsNew = false, curAdded = [], aiFilled = new Set(), specSugg = [], openGroups = null;
+let aiCtl = null, dirty = false;
+
+const missing = r => ["name","spec"].filter(k => !String(r[k]||"").trim());
+function show(view){ $("view-list").hidden = view!=="list"; $("view-edit").hidden = view!=="edit"; window.scrollTo(0,0); }
+
+/* ---------- list view ---------- */
+function renderList(){
+  const sum = $("summary"), list = $("list"); sum.replaceChildren(); list.replaceChildren();
+  const need = records.filter(r => missing(r).length).length;
+  sum.append(el("span",{class:"chip",text:records.length+(records.length===1?" asset":" assets")}));
+  if (records.length) sum.append(el("span",{class:"chip good",text:(records.length-need)+" ready"}));
+  if (need) sum.append(el("span",{class:"chip warn",text:need+" need details"}));
+  const waiting = records.filter(r=>r._pending).length;
+  if (waiting) sum.append(el("button",{type:"button",class:"chip warn",style:"border:0;min-height:32px",text:waiting+" waiting to sync. Tap to try now",onclick:()=>doSync(true)}));
+  sum.append(el("span",{class:"chip",text:"Saved on this phone"}));
+  getPack().then(p => { if (!p && !$("lists-warn")) sum.append(el("button",{type:"button",id:"lists-warn",class:"chip warn",style:"border:0;min-height:32px",text:"Lists not loaded. Tap to set up",onclick:openHelp})); });
+  if (!records.length) {
+    list.append(el("div",{class:"empty"}, el("h2",{text:"Start with the first asset"}),
+      el("ol",{}, el("li",{text:"Tap Add asset and photograph the nameplate."}),
+        el("li",{text:"Make, model and serial number are read from the photo. Check them, then tap the asset type and location. The name is built for you from the asset type, service area, label and capacity."}),
+        el("li",{text:"When you are done, tap Export Excel and share the workbook, with or without a Photos folder, straight to OneDrive."}))));
+  }
+  records.forEach((r,i) => {
+    const m = missing(r);
+    const thumb = (r.photos&&r.photos[0]) ? el("img",{class:"thumb",alt:"",loading:"lazy"}) : el("div",{class:"thumb",text:"No photo"});
+    if (thumb.tagName==="IMG") Store.photoUrl(r.photos[0]).then(u => { if (u) thumb.src = u; });
+    const loc = String(r.location||"").split("\\").filter(Boolean).slice(-2).join(" › ");
+    list.append(el("button",{type:"button",class:"card",onclick:()=>openEdit(r)},
+      thumb,
+      el("div",{class:"meta"},
+        el("div",{class:"name",text:r.name || [r.make,r.model].filter(Boolean).join(" ") || "Unnamed asset"}),
+        el("div",{class:"sub",text:[r.id&&"ID "+r.id, r.serial&&"S/N "+r.serial, r.barcode&&"BC "+r.barcode].filter(Boolean).join("  ·  ") || "No identifiers yet"}),
+        loc ? el("div",{class:"sub",text:loc}) : null,
+        el("div",{style:"display:flex;gap:6px;flex-wrap:wrap"}, m.length ? el("span",{class:"chip warn",text:"Needs "+m.map(k=>F[k].label.toLowerCase()).join(" and ")}) : el("span",{class:"chip good",text:"Ready"}), r._pending ? el("span",{class:"chip",text:"On this phone only"}) : null)),
+      el("div",{class:"num",text:String(i+1).padStart(3,"0")})));
+  });
+}
+
+/* ---------- edit view ---------- */
+function openEdit(rec){
+  curIsNew = !rec; curAdded = []; aiFilled = new Set(); specSugg = []; openGroups = null; dirty = false;
+  if (rec) { cur = JSON.parse(JSON.stringify(rec)); if (cur.name && cur.name !== buildName(cur)) cur.nameManual = true; }
+  else {
+    cur = {key:newKey(), createdAt:new Date().toISOString(), photos:[]};
+    const last = records[records.length-1];
+    if (last) for (const k of STICKY) if (last[k]) cur[k] = last[k];
+    cur.name = buildName(cur);
+  }
+  $("rawtext").hidden = true; renderReader();
+  $("edit-title").textContent = curIsNew ? "New asset" : (cur.name || "Edit asset");
+  const carried = curIsNew ? STICKY.filter(k=>cur[k]).map(k=>F[k].label.toLowerCase()) : [];
+  $("edit-sub").textContent = carried.length ? "Carried over from the last asset: "+carried.join(", ") : (curIsNew ? "Photograph the nameplate first" : "Asset "+String(records.findIndex(r=>r.key===cur.key)+1).padStart(3,"0"));
+  $("btn-delete").hidden = curIsNew;
+  setAi(null); renderPhotos(); renderForm(); show("edit");
+}
+function renderPhotos(){
+  const box = $("photos"); box.replaceChildren();
+  cur.photos.forEach((p,i) => {
+    const im = el("img",{alt:"Photo "+(i+1)+". Tap to zoom",style:"cursor:zoom-in",onclick:()=>openZoom(p,i)}); Store.photoUrl(p).then(u => { if (u) im.src = u; });
+    box.append(el("div",{class:"photo"}, im, el("button",{type:"button","aria-label":"Remove photo "+(i+1),text:"×",onclick:async()=>{
+      cur.photos.splice(i,1); dirty = true; renderPhotos();
+      if (curAdded.includes(p)) { curAdded = curAdded.filter(x=>x!==p); Store.delPhoto(p); } else (cur._removed = cur._removed||[]).push(p);
+    }})));
+  });
+  box.hidden = !cur.photos.length;
+}
+function fieldNode(k){
+  const f = F[k], id = "f-"+k;
+  const lab = el("label",{for:id}, f.label, f.req ? el("span",{class:"req",text:"required"}) : null, aiFilled.has(k) ? el("span",{class:"chip ai",text:"from photo"}) : null);
+  let ctl;
+  const set = v => { cur[k] = v; dirty = true; aiFilled.delete(k);
+    if (k==="name") cur.nameManual = v.trim() !== buildName(cur);
+    else if (NAMEPARTS.includes(k)) syncName(); };
+  if (f.type==="select") {
+    ctl = el("div",{id,class:"opts",role:"group","aria-label":f.label}, f.opts.map((o,i) => {
+      const b = el("button",{type:"button",class:"optb","aria-pressed":cur[k]===o?"true":"false",onclick:()=>{
+        set(cur[k]===o ? "" : o); if (k==="condition" && cur[k] && !cur.assessDate) cur.assessDate = today(); renderForm(); }});
+      if (f.icons) b.insertAdjacentHTML("beforeend", ICON[f.icons[i]]);
+      if (f.scale) { const m = /^(\d) - (.*)$/.exec(o); b.append(el("span",{class:"dot",style:"background:var(--s"+f.scale[i]+")",text:m?m[1]:""}), m?m[2]:o); }
+      else b.append(o);
+      return b; }));
+  } else if (f.type==="textarea") {
+    ctl = el("textarea",{id,maxlength:f.max,oninput:e=>set(e.target.value)}); ctl.value = cur[k]||"";
+  } else if (f.type==="pick") {
+    const v = cur[k]||"", strip = SRC[f.src].strip;
+    ctl = el("button",{type:"button",id,class:"pick",onclick:()=>openPicker(k)},
+      el("span",{class:"val"+(v?"":" ph"),text: v ? (v.startsWith(strip)?v.slice(strip.length):v).trim() : "Tap to search"}), el("span",{class:"go",text:"Search"}));
+  } else {
+    ctl = el("input",{id,type:f.type==="number"?"number":f.type,inputmode:f.type==="number"?"decimal":null,step:f.type==="number"?"0.01":null,maxlength:f.max,autocomplete:"off",autocapitalize:k==="serial"||k==="model"?"characters":null,oninput:e=>{ set(e.target.value); if (k==="make"||k==="model") queueSugg(); }});
+    ctl.value = cur[k]||"";
+  }
+  const node = el("div",{class:"f"+(aiFilled.has(k)?" ai":"")}, lab, ctl, f.hint ? el("div",{class:"note",text:f.hint,style:"margin-top:4px"}) : null);
+  if (f.type==="select") lab.removeAttribute("for");
+  if (k==="serial" && !cur.serial) node.append(el("button",{type:"button",class:"linkb",text:"No serial number on the asset: enter nil",onclick:()=>{ cur.serial = "nil"; dirty = true; renderForm(); }}));
+  if (k==="name" && cur.nameManual && buildName(cur)) node.append(el("button",{type:"button",class:"linkb",text:"Rebuild the name from the fields above",onclick:()=>{ cur.nameManual = false; cur.name = buildName(cur); dirty = true; renderForm(); }}));
+  if (k==="spec") {
+    const box = el("div",{class:"sugg",id:"spec-sugg"}); node.append(box); fillSugg(box);
+  }
+  return node;
+}
+function fillSugg(box){
+  box.replaceChildren();
+  const have = String(cur.spec||"");
+  if (have && lists.specs && lists.specs.then) lists.specs.then(L => { if (!L.failed && cur.spec===have && !L.raw.includes(have) && !box.querySelector(".chip")) box.prepend(el("span",{class:"chip warn",text:"Not in the template's specification list"})); });
+  const opts = specSugg.filter(s=>s!==have);
+  if (opts.length) { box.append(el("div",{class:"cap",text:specExact?"This model in the template list":"Same make in the template list. The model was not found, so check before choosing."})); opts.forEach(s => box.append(el("button",{type:"button",text:s.trim(),onclick:()=>{ cur.spec=s; dirty=true; renderForm(); }}))); }
+}
+function syncName(){
+  if (!cur || cur.nameManual) return;
+  cur.name = buildName(cur); const n = $("f-name"); if (n) n.value = cur.name;
+}
+let suggTimer;
+function queueSugg(){ clearTimeout(suggTimer); suggTimer = setTimeout(updateSugg, 350); }
+async function updateSugg(){
+  const L = await loadList("specs"); if (!cur) return;
+  specSugg = suggestSpecs(L, cur.make, cur.model, cur.atype);
+  const box = $("spec-sugg"); if (box) fillSugg(box);
+}
+function renderForm(){
+  const form = $("form");
+  if (!openGroups) openGroups = new Set(GROUPS.filter(g=>g.open || g.f.some(k=>F[k].req && !cur[k])).map(g=>g.t));
+  else { openGroups = new Set([...form.querySelectorAll("details[open]")].map(d=>d.dataset.t)); }
+  form.replaceChildren();
+  for (const g of GROUPS) {
+    const filled = g.f.filter(k=>String(cur[k]||"").trim()).length;
+    const d = el("details",{"data-t":g.t,open:openGroups.has(g.t)}, el("summary",{}, g.t, el("span",{class:"count",text:filled+" of "+g.f.length+" filled"})), el("div",{class:"fields"}, g.f.map(fieldNode)));
+    form.append(el("section",{class:"grp"}, d));
+  }
+}
+
+/* ---------- photos and nameplate reading ---------- */
+async function shrink(file){
+  let src, w, h;
+  try { src = await createImageBitmap(file,{imageOrientation:"from-image"}); w = src.width; h = src.height; }
+  catch(e) { src = await new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=URL.createObjectURL(file); }); w = src.naturalWidth; h = src.naturalHeight; }
+  const k = Math.min(1, 2800/Math.max(w,h)), c = document.createElement("canvas");
+  c.width = Math.round(w*k); c.height = Math.round(h*k); c.getContext("2d").drawImage(src,0,0,c.width,c.height);
+  return await new Promise(res => c.toBlob(res,"image/jpeg",.88));
+}
+function openZoom(p, i){
+  openSheet("Photo "+(i+1), async body => {
+    const box = el("div",{class:"zoom"}), im = el("img",{alt:"Photo "+(i+1)}); box.append(im);
+    box.onclick = () => box.classList.toggle("in");
+    body.append(box, el("div",{class:"note",text:"Tap the photo to zoom in or out, then drag to move around."}));
+    const u = await Store.photoUrl(p); if (u) im.src = u;
+  });
+}
+async function addFiles(fileList){
+  const files = [...fileList].filter(f=>f.type.startsWith("image/")||!f.type); if (!files.length) return;
+  setAi({busy:true,msg:"Saving photo…"});
+  const added = [];
+  for (const f of files) {
+    try { const b = await shrink(f); const p = await Store.addPhoto(b); cur.photos.push(p); curAdded.push(p); added.push(p); dirty = true; }
+    catch(e) { toast("That file could not be read as a photo."); }
+  }
+  renderPhotos();
+  if (!added.length) return setAi(null);
+  if (!Store.idb && added.some(p=>p.local)) toast("Photos can't be kept on this device. Export before closing the page.");
+  readNameplate();
+}
+/* ---------- reading the plate ---------- */
+let reader = "device"; try { reader = localStorage.getItem("pmbh-reader") || "device"; } catch(e) {}
+const onlineOk = () => !!onlineKey();
+function renderReader(){
+  const box = $("reader"); if (!box) return;
+  box.replaceChildren(el("span",{class:"lab",text:"Read the plate"}));
+  const mk = (id, text) => el("button",{type:"button",class:"optb","aria-pressed":(id==="device" ? !(reader==="online" && onlineOk()) : (reader==="online" && onlineOk()))?"true":"false",text,onclick:()=>{
+    if (id==="online" && !onlineOk()) return openHelp();
+    reader = id; try { localStorage.setItem("pmbh-reader", id); } catch(e) {} renderReader(); if (cur && cur.photos.length) readNameplate(); }});
+  box.append(mk("device","On this phone"));
+  box.append(mk("online","Online OCR"));
+}
+function setAi(s){
+  const box = $("aistatus"); box.replaceChildren();
+  if (!s) { box.hidden = true; return; }
+  box.hidden = false; box.className = "aistatus"+(s.bad?" bad":"");
+  if (s.busy) box.append(el("span",{class:"spin"}));
+  box.append(el("span",{class:"grow",text:s.msg}));
+  if (s.stop) box.append(el("button",{type:"button",text:"Stop",onclick:()=>aiCtl&&aiCtl.abort()}));
+  if (s.retry) box.append(el("button",{type:"button",text:"Read again",onclick:readNameplate}));
+  if (s.online && onlineOk()) box.append(el("button",{type:"button",text:"Try Online OCR",onclick:readOnline}));
+}
+function readNameplate(){ if (!cur || !cur.photos.length) return; return (reader==="online" && onlineOk()) ? readOnline() : readDevice(); }
+
+// Makes and models already in AFM, taken from the template's specification list ("TYPE : MAKE : MODEL").
+let dictP = null;
+const JUNK = /^(UNKNOWN|UNSPECIFIED|UNCLASSIFIED|N\/A|NA|NIL|TBA|TBC|VARIOUS|GENERIC|OTHER|NONE)$/i;
+function getDict(){
+  return dictP || (dictP = loadList("specs").then(L => { const makes = new Map();
+    for (const s of L.raw) { const p = s.split(" : ").map(x=>x.trim()); if (p.length<2) continue;
+      const mk = p.length>=3 ? p[p.length-2] : p[1], md = p.length>=3 ? p[p.length-1] : "", key = mk.toUpperCase();
+      if (key.length<3 || JUNK.test(key) || /^[\d\W]+$/.test(key)) continue;
+      let e = makes.get(key); if (!e) { e = {name:mk,n:0,models:new Set()}; makes.set(key,e); }
+      e.n++; if (md && !JUNK.test(md) && md.toUpperCase()!==key) e.models.add(md); }
+    return makes; }));
+}
+const KEYMAP = {make:"make",model:"model",serial:"serial",barcode:"barcode",asset_id:"id",details:"notes",manufacture_date:"mfgDate",asset_type:"atype",asset_label:"label",capacity:"cap"};
+async function applyRead(r, forKey){
+  const g = k => (r && typeof r[k]==="string") ? r[k].trim() : "";
+  const vals = {}; for (const [rk,k] of Object.entries(KEYMAP)) vals[k] = g(rk);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(vals.mfgDate)) vals.mfgDate = "";
+  const [T, dict, L] = await Promise.all([loadList("types"), getDict(), loadList("specs")]);
+  if (!cur || cur.key!==forKey) return null;
+  if (vals.atype) { const i = T.up.indexOf(vals.atype.toUpperCase()); vals.atype = i>=0 ? T.raw[i] : ""; }
+  if (vals.make && dict.has(vals.make.toUpperCase())) vals.make = dict.get(vals.make.toUpperCase()).name;   // spell it the way AFM already does
+  const got = [];
+  for (const [k,v] of Object.entries(vals)) if (v && (!String(cur[k]||"").trim() || aiFilled.has(k))) { cur[k] = v; aiFilled.add(k); got.push(F[k].label.toLowerCase().replace(/,.*$/,"")); }
+  if (!cur.nameManual) cur.name = buildName(cur);
+  dirty = true;
+  specSugg = suggestSpecs(L, cur.make, cur.model, cur.atype);
+  renderForm();
+  return got;
+}
+async function detectBarcode(blobs){
+  if (!("BarcodeDetector" in window)) return "";
+  try { const det = new BarcodeDetector();
+    for (const b of blobs) { const bmp = await createImageBitmap(b); const codes = await det.detect(bmp);
+      const c = codes.find(c => !/qr|matrix|aztec|pdf/.test(c.format) && c.rawValue && c.rawValue.length<=30); if (c) return c.rawValue; } } catch(e) {}
+  return "";
+}
+
+/* --- reader 1: on this phone (Tesseract OCR; the photo never leaves the device) --- */
+let ocrP = null, ocrProgress = null;
+const loadScript = src => new Promise((res,rej)=>{ const t = document.createElement("script"); t.src = src; t.onload = res; t.onerror = rej; document.head.append(t); });
+function getOcr(){
+  if (ocrP) return ocrP;
+  ocrP = (async () => {
+    if (typeof Tesseract==="undefined") await loadScript("ocr/tesseract.min.js");
+    const base = new URL("ocr/", document.baseURI).href;
+    const r = await fetch("ocr/eng-lang.json"); if (!r.ok) throw new Error("language data");
+    const data = Uint8Array.from(atob((await r.json())[0]), ch => ch.charCodeAt(0));
+    const w = await timeout(Tesseract.createWorker([{code:"eng",data}], 1, {workerPath:base+"worker.min.js", corePath:base, workerBlobURL:false, cacheMethod:"none",
+      logger:m => { if (ocrProgress && m.status==="recognizing text") ocrProgress(m.progress); }, errorHandler:()=>{}}), 90000);
+    await w.setParameters({tessedit_pageseg_mode:"11", preserve_interword_spaces:"1"});
+    return w;
+  })();
+  ocrP.catch(() => { ocrP = null; });
+  return ocrP;
+}
+async function prep(blob, invert){
+  const bmp = await createImageBitmap(blob), k = Math.min(1, 2400/Math.max(bmp.width,bmp.height));
+  const c = document.createElement("canvas"); c.width = Math.round(bmp.width*k); c.height = Math.round(bmp.height*k);
+  const x = c.getContext("2d",{willReadFrequently:true}); x.drawImage(bmp,0,0,c.width,c.height);
+  const im = x.getImageData(0,0,c.width,c.height), d = im.data, hist = new Uint32Array(256), n = d.length/4;
+  for (let i=0;i<d.length;i+=4) { const g = (d[i]*77+d[i+1]*150+d[i+2]*29)>>8; d[i] = g; hist[g]++; }
+  let lo = 0, hi = 255, a = 0; while (lo<254 && a+hist[lo]<n*.02) a += hist[lo++]; a = 0; while (hi>lo+1 && a+hist[hi]<n*.02) a += hist[hi--];
+  const sc = 255/Math.max(1,hi-lo);
+  for (let i=0;i<d.length;i+=4) { let g = Math.max(0,Math.min(255,(d[i]-lo)*sc)); if (invert) g = 255-g; d[i] = d[i+1] = d[i+2] = g; }
+  x.putImageData(im,0,0); return c;
+}
+function wordsOf(data){
+  const out = [];
+  for (const b of data.blocks||[]) for (const p of b.paragraphs||[]) for (const l of p.lines||[]) for (const w of l.words||[])
+    out.push({t:w.text, c:w.confidence, x0:w.bbox.x0, y0:w.bbox.y0, x1:w.bbox.x1, y1:w.bbox.y1});
+  return out;
+}
+const fold = t => t.toUpperCase().replace(/[^A-Z0-9]/g,"").replace(/[OQD]/g,"0").replace(/[IL]/g,"1").replace(/S/g,"5").replace(/B/g,"8").replace(/Z/g,"2").replace(/G/g,"6");
+function lev(a, b, max){
+  if (Math.abs(a.length-b.length)>max) return max+1;
+  let prev = Array.from({length:b.length+1},(_,i)=>i);
+  for (let i=1;i<=a.length;i++) { const row = [i]; let best = i;
+    for (let j=1;j<=b.length;j++) { row[j] = Math.min(prev[j]+1, row[j-1]+1, prev[j-1]+(a[i-1]===b[j-1]?0:1)); if (row[j]<best) best = row[j]; }
+    if (best>max) return max+1; prev = row; }
+  return prev[b.length];
+}
+const MONTHS = {JAN:1,FEB:2,MAR:3,APR:4,MAY:5,JUN:6,JUL:7,AUG:8,SEP:9,OCT:10,NOV:11,DEC:12};
+function parseDate(t){
+  const ok = (y,m,d) => (y>=1970 && y<=new Date().getFullYear() && m>=1 && m<=12 && d>=1 && d<=31) ? y+"-"+String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0") : "";
+  let m;
+  if ((m = /\b(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})\b/.exec(t))) return ok(+m[1],+m[2],+m[3]);
+  if ((m = /\b(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})\b/.exec(t))) return ok(+m[3],+m[2],+m[1]);
+  if ((m = /\b(\d{4})[-\/.](\d{1,2})\b/.exec(t))) return ok(+m[1],+m[2],1);
+  if ((m = /\b(\d{1,2})[-\/.](\d{4})\b/.exec(t))) return ok(+m[2],+m[1],1);
+  if ((m = /\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\.?,?\s*(\d{4})\b/i.exec(t))) return ok(+m[2],MONTHS[m[1].toUpperCase()],1);
+  if ((m = /\b(19[7-9]\d|20\d\d)\b/.exec(t))) return ok(+m[1],1,1);
+  return "";
+}
+const STOP = /^(NO|NUM|NUMBER|NAME|DATE|OF|THE|AND|FOR|VOLTS?|VOLTAGE|HZ|KW|PHASE|MODEL|MOD|SERIAL|SER|TYPE|MADE|IN|CODE|MFG|POWER|INPUT|OUTPUT|RATED|MAX|MIN|WARNING|CAUTION|AUSTRALIA|CHINA|GERMANY|JAPAN|PTY|LTD|CLASS|WEIGHT|CAPACITY)$/i;
+const RE_SERIAL = /(?:^|[^A-Z])(?:SERIAL|SER|S\/N|S\.N|SN|S\/NO)(?![A-Z])\.?\s*(?:NUMBER|NUM|NO|N0|#)?\.?\s*[:#.\-]*\s*/;
+const RE_MODEL = /(?:^|[^A-Z])(?:MODEL|MOD|M\/N)(?![A-Z])\.?\s*(?:NUMBER|NUM|NO|N0|NAME|#)?\.?\s*[:#.\-]*\s*/;
+const RE_TYPE = /(?:^|[^A-Z])(?:TYPE|TYP|REF|CAT)(?![A-Z])\.?\s*(?:NUMBER|NUM|NO|N0|#)?\.?\s*[:#.\-]*\s*/;
+const RE_DATE = /(?:^|[^A-Z])(?:MFG|MFD|MANUFACTURED?|MANUF|DATE|DOM|YEAR|BUILT|PRODUCTION|PROD)(?![A-Z])[A-Z .\/]*[:#.\-]*\s*/;
+function parsePlate(words, dict){
+  words = words.filter(w => w.c>=35 && /[A-Za-z0-9]/.test(w.t));
+  const lines = [];
+  for (const w of words.slice().sort((a,b)=>a.y0-b.y0)) {
+    const cy = (w.y0+w.y1)/2; let L = lines.find(l => cy>l.y0 && cy<l.y1);
+    if (!L) { L = {y0:w.y0, y1:w.y1, w:[]}; lines.push(L); } L.w.push(w);
+  }
+  lines.forEach(l => { l.w.sort((a,b)=>a.x0-b.x0); l.text = l.w.map(w=>w.t).join(" "); });
+  const text = lines.map(l=>l.text).join("\n"), norm = fold(text);
+  const out = {make:"", model:"", serial:"", manufacture_date:"", details:"", unclear:[], text, strong:words.filter(w=>w.c>=60).length};
+  const clean = t => t.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g,"");
+  const pick = (toks, needDigit) => toks.map(clean).filter(t => t && !STOP.test(t)).find(t => t.length>=3 && (!needDigit || /\d/.test(t))) || "";
+  const valueAfter = (re, needDigit, raw) => {
+    for (let i=0;i<lines.length;i++) { const U = lines[i].text.toUpperCase(), m = re.exec(U); if (!m) continue;
+      const rest = lines[i].text.slice(m.index+m[0].length);
+      if (raw && rest.trim()) return rest;
+      let v = pick(rest.split(/\s+/), needDigit);
+      if (!v && lines[i+1]) {            // value printed under its label: take the word below that lines up with it
+        const lab = lines[i].w.find(w => re.test(" "+w.t.toUpperCase()+" ")) || lines[i].w[0], lx = (lab.x0+lab.x1)/2;
+        const below = lines[i+1].w.slice().sort((a,b)=>Math.abs((a.x0+a.x1)/2-lx)-Math.abs((b.x0+b.x1)/2-lx));
+        if (raw) return lines[i+1].text;
+        v = pick(below.map(w=>w.t), needDigit);
+      }
+      if (v) return v; }
+    return ""; };
+  out.serial = valueAfter(RE_SERIAL, true);
+  // make: a known AFM manufacturer printed on the plate, the larger the lettering the better
+  let best = null;
+  for (const l of lines) for (let i=0;i<l.w.length;i++) for (const span of [1,2]) {
+    if (i+span>l.w.length) continue;
+    const ws = l.w.slice(i,i+span), key = ws.map(w=>clean(w.t)).join(" ").toUpperCase(), e = dict.get(key);
+    if (!e || STOP.test(key)) continue;
+    const h = ws.reduce((a,w)=>a+(w.y1-w.y0),0)/span, sc = h*(1+Math.log(e.n))*(span===2?1.3:1);
+    if (!best || sc>best.sc) best = {sc, e};
+  }
+  if (best) out.make = best.e.name;
+  else { const big = words.filter(w => /^[A-Za-z][A-Za-z&\-]{2,}$/.test(clean(w.t)) && !STOP.test(clean(w.t))).sort((a,b)=>(b.y1-b.y0)-(a.y1-a.y0))[0];
+    if (big) { out.make = clean(big.t); out.unclear.push("make"); } }
+  // model: prefer a model AFM already holds for that make, then a labelled value
+  const labelled = valueAfter(RE_MODEL, false) || valueAfter(RE_TYPE, true);
+  if (best) {
+    let hit = "";
+    for (const m of best.e.models) { const n = fold(m); if (n.length>=3 && n.length>fold(hit).length && norm.includes(n)) hit = m; }
+    if (hit && labelled && fold(labelled).length>fold(hit).length+2 && !fold(labelled).includes(fold(hit))) hit = "";   // the plate's own labelled model wins over a shorter chance match
+    if (!hit && labelled && fold(labelled).length>=5) {   // OCR slips: snap to the nearest model AFM already holds for this make
+      let bd = 3; const fl = fold(labelled);
+      for (const m of best.e.models) { const d = lev(fl, fold(m), 2); if (d<bd) { bd = d; hit = m; } }
+      if (hit) out.unclear.push("model");
+    }
+    out.model = hit;
+  }
+  if (!out.model) out.model = labelled;
+  if (!out.model && best) { const l = lines.find(l => l.text.toUpperCase().includes(best.e.name.toUpperCase())); if (l) out.model = pick(l.text.toUpperCase().split(best.e.name.toUpperCase()).pop().split(/\s+/), true); }
+  const dl = valueAfter(RE_DATE, false, true); if (dl) out.manufacture_date = parseDate(dl.toUpperCase());
+  out.details = lines.map(l=>l.text).filter(t => /\d\s?(KW|KVA|W|V|VAC|HZ|A|KG|L|KPA|MPA|BAR|RPM|HP|L\/S|L\/MIN)\b|\bR-?\d{2,3}[A-Z]?\b|\bIP\d{2}\b/i.test(t)).slice(0,5).join("; ").slice(0,240);
+  return out;
+}
+async function readDevice(){
+  if (!cur || !cur.photos.length) return;
+  if (aiCtl) aiCtl.abort();
+  const forKey = cur.key, first = !ocrP;
+  setAi({busy:true,msg: first ? "Getting the on-phone reader ready. The first time takes a little longer…" : "Reading on this phone…"});
+  try {
+    const [w, dict] = await Promise.all([getOcr(), getDict()]);
+    const blobs = (await Promise.all(cur.photos.slice(-2).map(p=>Store.photoBlob(p)))).filter(Boolean);
+    if (!blobs.length) throw new Error("no photo");
+    const merged = {unclear:[]}, texts = [];
+    for (let i=0;i<blobs.length;i++) {
+      ocrProgress = p => { if (cur && cur.key===forKey) setAi({busy:true,msg:"Reading on this phone… photo "+(i+1)+" of "+blobs.length+", "+Math.round(p*100)+"%"}); };
+      let res = parsePlate(wordsOf((await w.recognize(await prep(blobs[i],false), {}, {text:true,blocks:true})).data), dict);
+      if (res.strong<4) { const inv = parsePlate(wordsOf((await w.recognize(await prep(blobs[i],true), {}, {text:true,blocks:true})).data), dict); if (inv.strong>res.strong) res = inv; }
+      if (res.text) texts.push(res.text);
+      for (const k of ["make","model","serial","manufacture_date","details"]) if (!merged[k] && res[k]) { merged[k] = res[k]; if (res.unclear.includes(k)) merged.unclear.push(k); }
+    }
+    ocrProgress = null;
+    merged.barcode = await detectBarcode(blobs);
+    if (!cur || cur.key!==forKey) return;
+    $("rawpre").textContent = texts.join("\n\n"); $("rawtext").hidden = !texts.length;
+    const got = await applyRead(merged, forKey); if (!got) return;
+    const un = (merged.unclear.includes("make") ? " The make is a guess." : "")+(merged.unclear.includes("model") ? " The model was matched to the closest one already in AFM." : "");
+    setAi({retry:true, online:true, bad:!got.length, msg: got.length ? "Read on this phone: "+got.join(", ")+"."+un+" Check each against the plate. Choose the asset type yourself."+(onlineOk()?" Online OCR reads worn or stamped plates better.":"")
+      : (texts.length ? "Text was found but no make, model or serial could be picked out. Open the text below, or retake the photo closer and square on." : "No text could be read. Retake the photo closer, square on and out of glare.")});
+  } catch(e) {
+    ocrProgress = null;
+    if (cur && cur.key===forKey) setAi({bad:true, retry:true, online:true, msg:"The on-phone reader could not start in this view."+(onlineOk()?" Try Online OCR, or type the details.":" Type the details below.")});
+  }
+}
+
+/* --- reader 2: Online OCR (OCR.space). The photo is sent to that service; needs a connection and a free API key. --- */
+const onlineKey = () => { try { return (localStorage.getItem("pmbh-ocrkey")||"").trim(); } catch(e) { return ""; } };
+async function shrinkFor(blob, maxBytes){
+  const bmp = await createImageBitmap(blob); let side = 2200, q = .85, out = blob;
+  for (let i=0;i<7;i++) {
+    const k = Math.min(1, side/Math.max(bmp.width,bmp.height)), c = document.createElement("canvas");
+    c.width = Math.round(bmp.width*k); c.height = Math.round(bmp.height*k); c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
+    out = await new Promise(res => c.toBlob(res,"image/jpeg",q));
+    if (out && out.size<=maxBytes) return out;
+    side = Math.round(side*.85); q = Math.max(.6, q-.05);
+  }
+  return out;
+}
+async function readOnline(){
+  if (!cur || !cur.photos.length) return;
+  if (!onlineOk()) return openHelp();
+  if (!Store.online()) return setAi({bad:true,retry:true,msg:"No connection. Use the on-phone reader now, and Online OCR when you have signal."});
+  if (aiCtl) aiCtl.abort();
+  const ctl = aiCtl = new AbortController(), forKey = cur.key;
+  setAi({busy:true,msg:"Online OCR is reading the plate…",stop:true});
+  try {
+    const dict = await getDict();
+    const blobs = (await Promise.all(cur.photos.slice(-2).map(p=>Store.photoBlob(p)))).filter(Boolean);
+    if (!blobs.length) throw {code:"photo"};
+    const merged = {unclear:[]}, texts = [];
+    for (const b of blobs) {
+      const fd = new FormData();
+      fd.append("apikey", onlineKey()); fd.append("language","eng"); fd.append("isOverlayRequired","true"); fd.append("OCREngine","2");
+      fd.append("scale","true"); fd.append("detectOrientation","true"); fd.append("file", await shrinkFor(b, 950000), "plate.jpg");
+      const r = await fetch("https://api.ocr.space/parse/image",{method:"POST",body:fd,signal:ctl.signal});
+      if (r.status===401 || r.status===403) throw {code:"key"};
+      if (!r.ok) throw {code:"http"};
+      const j = await r.json();
+      if (j.IsErroredOnProcessing) { const m = [].concat(j.ErrorMessage||"").join(" "); throw {code:/key/i.test(m)?"key":"api", message:m}; }
+      const words = [];
+      for (const pr of j.ParsedResults||[]) for (const l of (pr.TextOverlay && pr.TextOverlay.Lines)||[]) for (const w of l.Words||[])
+        words.push({t:String(w.WordText), c:90, x0:w.Left, y0:w.Top, x1:w.Left+w.Width, y1:w.Top+w.Height});
+      const res = parsePlate(words, dict);
+      if (res.text) texts.push(res.text);
+      for (const k of ["make","model","serial","manufacture_date","details"]) if (!merged[k] && res[k]) { merged[k] = res[k]; if (res.unclear.includes(k)) merged.unclear.push(k); }
+    }
+    merged.barcode = await detectBarcode(blobs);
+    if (!cur || cur.key!==forKey) return;
+    $("rawpre").textContent = texts.join("\n\n"); $("rawtext").hidden = !texts.length;
+    const got = await applyRead(merged, forKey); if (!got) return;
+    const un = (merged.unclear.includes("make") ? " The make is a guess." : "")+(merged.unclear.includes("model") ? " The model was matched to the closest one already in AFM." : "");
+    setAi({retry:true, bad:!got.length, msg: got.length ? "Online OCR read "+got.join(", ")+"."+un+" Check each against the plate. Choose the asset type yourself."
+      : (texts.length ? "Text was found but no make, model or serial could be picked out. Open the text below, or retake the photo closer and square on." : "No text could be read. Retake the photo closer, square on and out of glare.")});
+  } catch(e) {
+    if (!cur || cur.key!==forKey) return;
+    const code = e && e.code;
+    if (e && e.name==="AbortError") return setAi({msg:"Stopped. Type the details or read again.",retry:true});
+    setAi({bad:true,retry:true,msg: code==="key" ? "The Online OCR key was not accepted. Check it in Setup." : code==="api" ? "Online OCR could not process the photo"+(e.message?": "+e.message.slice(0,120):".")+" Use the on-phone reader or type the details."
+      : "Online OCR could not be reached. Use the on-phone reader, or try again when the signal is better."});
+  } finally { if (aiCtl===ctl) aiCtl = null; }
+}
+
+/* ---------- sheets ---------- */
+function openSheet(title, build){
+  const body = el("div",{class:"body"});
+  const close = () => scrim.remove();
+  const scrim = el("div",{class:"scrim",onclick:e=>{ if (e.target===scrim) close(); }},
+    el("div",{class:"sheet",role:"dialog","aria-modal":"true","aria-label":title}, el("header",{}, el("h2",{text:title}), el("button",{type:"button",class:"x","aria-label":"Close",text:"×",onclick:close})), body));
+  $("sheets").append(scrim); build(body, close); return close;
+}
+function confirmSheet(title, msg, yes, danger){
+  return new Promise(res => { let done = false;
+    const close = openSheet(title, (body, c) => { body.append(el("p",{text:msg,style:"margin:0"}),
+      el("div",{class:"row2"}, el("button",{type:"button",class:"btn",text:"Cancel",onclick:()=>{done=true;c();res(false);}}), el("button",{type:"button",class:"btn "+(danger?"danger":"primary"),text:yes,onclick:()=>{done=true;c();res(true);}}))); });
+    const obs = new MutationObserver(()=>{ if (!done && !$("sheets").children.length) { obs.disconnect(); res(false); } }); obs.observe($("sheets"),{childList:true});
+  });
+}
+function openPicker(k){
+  const f = F[k], S = SRC[f.src];
+  openSheet(S.title, async (body, close) => {
+    const input = el("input",{type:"search",id:"pick-q",placeholder:S.ph,autocomplete:"off","aria-label":S.ph});
+    const res = el("div",{class:"results"});
+    body.append(input, res);
+    const choose = v => { cur[k] = v; dirty = true; aiFilled.delete(k); if (NAMEPARTS.includes(k) && !cur.nameManual) cur.name = buildName(cur); if (k==="atype") queueSugg(); close(); renderForm(); };
+    const L = await loadList(f.src);
+    const show = v => (v.startsWith(S.strip)?v.slice(S.strip.length):v).trim();
+    let group = "";
+    const draw = () => {
+      res.replaceChildren();
+      const q = input.value.trim();
+      let items;
+      if (!q && L.meta && !group) {
+        const counts = {}; for (const o of L.meta) counts[o.g] = (counts[o.g]||0)+1;
+        const tiles = el("div",{class:"tiles"});
+        for (const g of Object.keys(ICON).filter(g=>counts[g])) { const b = el("button",{type:"button",class:"tile",onclick:()=>{ group = g; draw(); }}); b.insertAdjacentHTML("beforeend", ICON[g]); b.append(g, el("small",{text:counts[g]+" types"})); tiles.append(b); }
+        res.append(el("div",{class:"note",text:"Pick a discipline, or type above to search all "+L.raw.length+" asset types in the Asset Data Standard.",style:"padding:4px 0 8px"}), tiles);
+        items = [];
+      } else if (!q && L.meta) {
+        res.append(el("button",{type:"button",class:"free",text:"‹ All disciplines",onclick:()=>{ group = ""; draw(); }}));
+        items = L.meta.filter(o=>o.g===group).map(o=>o.t).sort();
+      } else if (!q) {
+        const recent = [...new Set(records.map(r=>r[k]).filter(Boolean).reverse())].slice(0,8);
+        items = k==="spec" && specSugg.length ? specSugg : recent;
+        if (items.length) res.append(el("div",{class:"note",text:k==="spec"&&specSugg.length?"Closest matches for this make and model":"Used recently",style:"padding:4px 0"}));
+        else res.append(el("div",{class:"note",text: L.failed ? "Lists are not loaded yet. Open Setup on the first screen and load the lists file. Until then, type the value and use it as written." : "Type to search "+L.raw.length.toLocaleString()+" entries from the template.",style:"padding:8px 0"}));
+      } else {
+        items = searchList(L, q);
+        if (!items.length) res.append(el("div",{class:"note",text:"No match in the template list.",style:"padding:8px 0"}));
+      }
+      for (const v of items) res.append(el("button",{type:"button",text:show(v),onclick:()=>choose(v)}));
+      if (q && !items.some(v=>v.trim().toUpperCase()===q.toUpperCase())) res.append(el("button",{type:"button",class:"free",onclick:()=>choose(q)}, "Use “"+q+"” as typed", el("small",{text:S.free || "Not in the template list. The data load may reject it."})));
+      if (cur[k]) res.append(el("button",{type:"button",class:"free",text:"Clear this field",onclick:()=>choose("")}));
+    };
+    let t; input.addEventListener("input",()=>{ clearTimeout(t); t=setTimeout(draw,120); });
+    if (k==="spec" && !specSugg.length && (cur.make||cur.model)) input.value = [cur.make,cur.model].filter(Boolean).join(" ");
+    draw(); input.focus();
+  });
+}
+
+/* ---------- save / delete ---------- */
+async function saveCur(){
+  const btn = $("btn-save"); btn.disabled = true; btn.textContent = "Saving…";
+  let rec = Object.assign({}, cur); const removed = rec._removed || []; delete rec._removed;
+  rec.updatedAt = new Date().toISOString();
+  try {
+    rec = await Store.put(rec);
+    const i = records.findIndex(r=>r.key===rec.key); if (i>=0) records[i] = rec; else records.push(rec);
+    removed.forEach(p=>Store.delPhoto(p));
+    if (aiCtl) aiCtl.abort();
+    cur = null; renderList(); show("list");
+    const m = missing(rec); toast(rec._pending ? "Saved on this phone. It will sync when you are back online." : m.length ? "Saved. Still needs "+m.map(k=>F[k].label.toLowerCase()).join(" and ")+"." : "Asset saved.");
+  } catch(e) {
+    toast(e && e.code==="quota_exceeded" ? "Storage is full. Export and clear the list, then save again." : "Could not save. Check your connection and tap Save again.");
+  } finally { btn.disabled = false; btn.textContent = "Save asset"; }
+}
+async function leaveEdit(){
+  if (dirty && !(await confirmSheet("Discard changes?","This asset has changes that are not saved.","Discard",true))) return;
+  if (aiCtl) aiCtl.abort();
+  curAdded.forEach(p=>Store.delPhoto(p));
+  cur = null; show("list");
+}
+async function deleteCur(){
+  if (!(await confirmSheet("Delete this asset?","The asset and its photos are removed for good.","Delete",true))) return;
+  try { await Store.del(cur.key); } catch(e) { return toast("Could not delete. Check your connection and try again."); }
+  (cur.photos||[]).concat(cur._removed||[]).forEach(p=>Store.delPhoto(p));
+  records = records.filter(r=>r.key!==cur.key); cur = null; renderList(); show("list"); toast("Asset deleted.");
+}
+
+/* ---------- export ---------- */
+const safe = s => String(s||"").replace(/[^A-Za-z0-9._-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40);
+const photoNames = (r,i) => (r.photos||[]).map((p,n) => String(i+1).padStart(3,"0")+"_"+(safe(r.barcode||r.id||r.serial||r.name)||"asset")+"_"+(n+1)+".jpg");
+function buildWorkbook(withPhotos){
+  const colKey = {}; for (const [k,f] of Object.entries(F)) if (f.col) colKey[f.col] = k;
+  const rows = [HEADERS];
+  records.forEach((r,i) => rows.push(HEADERS.map(h => {
+    if (h==="CSTDCRECORDIDTX") return String(i+1);
+    const k = colKey[h]; if (!k) return null;
+    const v = r[k]; if (v==null || v==="") return null;
+    if (F[k].type==="date") { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v); return m ? {t:"n",v:(Date.UTC(+m[1],+m[2]-1,+m[3])-Date.UTC(1899,11,30))/864e5,z:"dd/mm/yyyy"} : String(v); }
+    if (F[k].type==="number") { const n = Number(v); return isFinite(n) ? n : String(v); }
+    return {t:"s",v:String(v)};
+  })));
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = HEADERS.map(h => ({wch:Math.max(14,h.length+2)}));
+  const log = [["Record ID","Asset ID","Name","Asset type","Service area","Asset label","Capacity / energy / utility","Make","Model","Serial number","Other nameplate details","Photo files","Captured","Still missing"]];
+  records.forEach((r,i) => log.push([String(i+1), r.id||"", r.name||"", r.atype||"", r.area||"", r.label||"", r.cap||"", r.make||"", r.model||"", r.serial||"", r.notes||"", withPhotos ? photoNames(r,i).map(n=>"Photos/"+n).join("; ") : (r.photos||[]).length+" photo(s) in the app", (r.createdAt||"").slice(0,16).replace("T"," "), missing(r).map(k=>F[k].label).join(", ")]));
+  const ws2 = XLSX.utils.aoa_to_sheet(log); ws2["!cols"] = [10,14,34,24,16,14,20,18,22,22,44,44,18,22].map(w=>({wch:w}));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "triBuildingEquipment Data");
+  XLSX.utils.book_append_sheet(wb, ws2, "Capture Log");
+  return new Blob([XLSX.write(wb,{type:"array",bookType:"xlsx"})],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+}
+async function saveFile(filename, blob){
+  const file = new File([blob], filename, {type:blob.type || "application/octet-stream"});
+  if (matchMedia("(pointer:coarse)").matches && navigator.canShare && navigator.canShare({files:[file]})) {
+    try { await navigator.share({files:[file], title:filename}); return; }
+    catch(e) { if (e && e.name==="AbortError") throw {code:"declined"}; }
+  }
+  const a = el("a",{href:URL.createObjectURL(blob),download:filename}); document.body.append(a); a.click(); a.remove();
+}
+const XLSX_NAME = () => "AFMO-triBuildingEquipment_Update_PMBH_"+today()+".xlsx";
+async function doExport(kind, btn, status){
+  const label = btn.textContent; btn.disabled = true;
+  try {
+    if (typeof XLSX==="undefined" || (kind==="zip" && typeof JSZip==="undefined")) throw {code:"lib"};
+    let blob, name, lost = 0;
+    if (kind==="xlsx") { blob = buildWorkbook(false); name = XLSX_NAME(); }
+    else {
+      const zip = new JSZip(); zip.file(XLSX_NAME(), buildWorkbook(true));
+      const total = records.reduce((n,r)=>n+(r.photos||[]).length,0); let done = 0;
+      for (let i=0;i<records.length;i++) { const names = photoNames(records[i],i);
+        for (let n=0;n<names.length;n++) { status.textContent = "Collecting photo "+(++done)+" of "+total+"…"; const b = await Store.photoBlob(records[i].photos[n]); if (b) zip.file("Photos/"+names[n], b); else lost++; } }
+      status.textContent = "Packing…";
+      blob = await zip.generateAsync({type:"blob",compression:"STORE",mimeType:"application/zip"}); name = "PMBH Asset Capture "+today()+".zip";
+    }
+    status.textContent = "";
+    await saveFile(name, blob);
+    status.textContent = "Saved "+name+"."+(lost ? " "+lost+" photo(s) could not be fetched and are missing from the ZIP." : "");
+  } catch(e) {
+    const code = e && e.code;
+    status.textContent = code==="declined" ? "" : code==="lib" ? "The Excel library did not load. Check your connection and reload the page." : code==="rate_limited" ? "A save prompt is already open. Answer it, then try again." : "The file could not be saved. Try again.";
+  } finally { btn.disabled = false; btn.textContent = label; }
+}
+function openExport(){
+  openSheet("Export", (body, close) => {
+    if (!records.length) return body.append(el("p",{text:"Add at least one asset first.",style:"margin:0"}));
+    const need = records.filter(r=>missing(r).length).length, nPhotos = records.reduce((n,r)=>n+(r.photos||[]).length,0);
+    const status = el("div",{class:"note",role:"status"});
+    if (need) body.append(el("div",{class:"banner",style:"margin:0",text:need+" of "+records.length+" assets are missing a name or specification. The template will flag them when you validate."}));
+    const b1 = el("button",{type:"button",class:"btn primary block",text:"Save Excel and photos (ZIP)"}), b2 = el("button",{type:"button",class:"btn block",text:"Save Excel only"});
+    b1.onclick = () => doExport("zip", b1, status); b2.onclick = () => doExport("xlsx", b2, status);
+    body.append(
+      el("div",{class:"opt"}, el("h3",{text:"Excel with a Photos folder"}), el("p",{text:records.length+" assets and "+nPhotos+" photos. Unzips to this layout:"}),
+        el("pre",{class:"tree",text:"PMBH Asset Capture "+today()+"/\n├─ "+XLSX_NAME()+"\n└─ Photos/\n   ├─ 001_<barcode>_1.jpg\n   └─ …"}), b1),
+      el("div",{class:"opt"}, el("h3",{text:"Excel only"}), el("p",{text:"One workbook. The first sheet has the 36 columns of triBuildingEquipment Data in template order; the second lists make, model and photo details."}), b2),
+      status,
+      el("div",{class:"opt"}, el("h3",{text:"Clear the list"}), el("p",{text:"After the export is safely in OneDrive, remove these assets and photos to start the next batch."}),
+        el("button",{type:"button",class:"btn danger block",text:"Delete all "+records.length+" assets",onclick:async()=>{ close(); if (!(await confirmSheet("Delete all assets?","All "+records.length+" assets and their photos are removed for good. Do this only after the export is saved.","Delete all",true))) return;
+          const left = []; for (const r of records) { try { await Store.del(r.key); (r.photos||[]).forEach(p=>Store.delPhoto(p)); } catch(e) { left.push(r); } }
+          records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
+  });
+}
+function openHelp(){
+  openSheet("Setup", async body => {
+    const p = await getPack();
+    const key = el("input",{type:"text",id:"ocr-key",placeholder:"Paste your OCR.space API key",autocomplete:"off",autocapitalize:"off",spellcheck:"false",style:"width:100%;min-height:48px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg)"}); key.value = onlineKey();
+    body.append(
+      el("div",{class:"opt"}, el("h3",{text:"1. Lists file"}),
+        el("p",{text: p ? "Loaded: "+(p.specs||[]).length.toLocaleString()+" specifications, "+(p.locations||[]).length.toLocaleString()+" locations, "+(p.types||[]).length+" asset types."+(p.version?" Source: "+p.version+".":"") : "Not loaded. The searchable specifications, locations, organisations, cost codes and asset types come from the file pmbh-lists.json. Save it to this phone, then load it here. It stays on the phone."}),
+        el("button",{type:"button",class:"btn block"+(p?"":" primary"),text:p?"Replace the lists file":"Load the lists file",onclick:()=>$("in-lists").click()})),
+      el("div",{class:"opt"}, el("h3",{text:"2. Add to the home screen"}),
+        el("p",{text:"In the browser menu choose Add to Home Screen (iPhone: Share, then Add to Home Screen). The app then opens like any other app, with or without signal, and the phone keeps its data."})),
+      el("div",{class:"opt"}, el("h3",{text:"3. Online OCR (optional)"}),
+        el("p",{text:"The on-phone reader needs nothing. Online OCR is stronger on worn or stamped plates. It sends the photo to OCR.space, a third-party service, so check that is acceptable for your site. It needs a free API key from ocr.space/ocrapi/freekey."}),
+        key,
+        el("button",{type:"button",class:"btn block",text:"Save key",onclick:()=>{ try { localStorage.setItem("pmbh-ocrkey", key.value.trim()); } catch(e) {} if (!key.value.trim() && reader==="online") reader = "device"; renderReader(); toast(key.value.trim() ? "Online OCR key saved on this phone." : "Online OCR key removed."); }})),
+      el("div",{class:"opt"}, el("h3",{text:"Where your work is kept"}),
+        el("p",{text:"Assets and photos are stored on this phone only, inside this app. Nothing is uploaded unless you use Online OCR or share an export. Export at the end of each day: clearing the browser's site data, or removing the app, deletes them."})),
+      el("div",{class:"opt"}, el("h3",{text:"Getting the Excel into OneDrive"}),
+        el("ol",{class:"steps"},
+          el("li",{text:"Tap Export Excel, then choose OneDrive in the share screen and pick Asset Validation › PMBH › Asset Update Data load. It syncs to the same folder on your computer."}),
+          el("li",{text:"Open the export, copy the rows under the header on the first sheet, and paste them into row 2 of triBuildingEquipment Data in the .xlsm template."}),
+          el("li",{text:"Press Ctrl-Shift-V to validate, then continue the data load as usual."}))));
+  });
+}
+
+/* ---------- wiring ---------- */
+$("btn-add").onclick = () => openEdit(null);
+$("btn-export").onclick = openExport;
+$("btn-help").onclick = openHelp;
+$("btn-back").onclick = leaveEdit; $("btn-cancel").onclick = leaveEdit;
+$("btn-save").onclick = saveCur; $("btn-delete").onclick = deleteCur;
+$("btn-cam").onclick = () => $("in-cam").click(); $("btn-gal").onclick = () => $("in-gal").click();
+$("in-lists").addEventListener("change", e => { const f = e.target.files[0]; e.target.value = ""; if (f) importLists(f); });
+for (const id of ["in-cam","in-gal"]) $(id).addEventListener("change", e => { const fl = [...e.target.files]; e.target.value = ""; addFiles(fl); });
+
+async function loadRecords(){
+  const b = $("banner");
+  try { records = (await Store.list()).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))); b.hidden = true;
+    if (Store.cloudDown) { b.hidden = false; b.className = "banner"; b.replaceChildren("No connection. Only assets waiting on this phone are shown; new ones are kept here until you are back online. ", el("button",{type:"button",class:"btn",text:"Try again",style:"min-height:36px;margin-left:6px",onclick:()=>{ b.textContent = "Loading…"; loadRecords(); }})); }
+    else doSync(false); }
+  catch(e) { b.hidden = false; b.className = "banner bad"; b.replaceChildren("Your saved assets could not be loaded. ", el("button",{type:"button",class:"btn",text:"Try again",style:"min-height:36px;margin-left:6px",onclick:()=>{ b.textContent = "Loading…"; loadRecords(); }})); }
+  renderList();
+}
+let syncing = false;
+async function doSync(say){
+  if (syncing) return; syncing = true;
+  try {
+    if (Store.cloudDown && Store.online()) { syncing = false; return loadRecords(); }
+    const done = await Store.syncPending();
+    for (const c of done) { const i = records.findIndex(r=>r.key===c.key); if (i>=0) records[i] = c; }
+    if (done.length) { if ($("view-edit").hidden) renderList(); toast(done.length+(done.length===1?" asset":" assets")+" synced to your account."); }
+    else if (say) toast(Store.online() ? "Could not sync yet. Try again shortly." : "Still offline. Your assets are safe on this phone.");
+  } catch(e) {} finally { syncing = false; }
+}
+window.addEventListener("online", () => doSync(false));
+(async function start(){
+  $("summary").append(el("span",{class:"chip",text:"Opening your asset list…"}));
+  Store.ready = Store.init();
+  for (const n of Object.keys(SRC)) loadList(n);
+  renderReader();
+  await Store.ready;
+  await loadRecords();
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
+  setTimeout(() => { getOcr().catch(()=>{}); getDict(); }, 2500);   // have the on-phone reader ready before it is needed
+})();
+</script>
+</body>
+</html>
