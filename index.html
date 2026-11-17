@@ -383,6 +383,50 @@ function srcInfo(src, f){
   if (/Spec:/.test(src)) return {title:"Specification",strip:"",ph:"Search make, model or type"};
   return {title:f ? f.label : "Choose",strip:"",ph:"Search"};
 }
+// Building System Class follows from the asset type. First matching rule wins; the user can still change it.
+const CLASS_RULES = [
+  ["Fire", /alarm|detector|indicating|call point|speaker|strobe|warning|warden|sounder|graphic|aspirating/i, "D7050"],
+  ["Fire", /door|shutter/i, "C1030"], ["Fire", /louver/i, "B2070"], ["Fire", /extinguisher|blanket/i, "D4030"], ["Fire", /curtain|stopping|block plan/i, ""], ["Fire", /./, "D4010"],
+  ["Mechanical", /medical refrigerator/i, "E1020"], ["Mechanical", /domestic/i, "E1060"], ["Mechanical", /refrigerator|freezer|cool room|ice maker/i, "E1050"],
+  ["Mechanical", /trapped person/i, "D7050"], ["Mechanical", /garbage/i, ""],
+  ["Mechanical", /fuel|gas services|gas valve|gas booster|gas cylinder/i, "D3010"],
+  ["Mechanical", /boiler|calorifier|heater|radiator|heating hot water|furnace|heat exchanger|steam/i, "D3020"],
+  ["Mechanical", /chiller|cooling tower|fluid cooler|evaporative|pre-cooler/i, "D3030"],
+  ["Mechanical", /air conditioner|air conditioning|fan coil|heat pump|air terminal|heating cooling ventilation|condenser|evaporator/i, "D3040"],
+  ["Mechanical", /air handling|damper|coil|filtration|hepa|humidifier|dehumidifier|energy recovery/i, "D3050"],
+  ["Mechanical", /fan|exhaust|hood|air curtain|make-up/i, "D3060"],
+  ["Mechanical", /compress|receiver|accumulator|breathing air|vacuum pump/i, "D2060"], ["Mechanical", /./, "D3080"],
+  ["Hydraulics", /sewer|grease|plaster trap|oil separator/i, "D2020"], ["Hydraulics", /bulk gas/i, "D2040"], ["Hydraulics", /controls equipment/i, "D2030"], ["Hydraulics", /./, "D2010"],
+  ["Electrical", /generator|fuel cell|solar|battery|ups|load bank/i, "D5010"], ["Electrical", /light(?!ning)/i, "D5040"], ["Electrical", /lightning/i, "D5080"], ["Electrical", /./, "D5020"],
+  ["Medical", /oxygen|manifold|medical air|suction|gas alarm|annunciator|column|pendant|terminal unit/i, "D2040"], ["Medical", /sterilis/i, "D90"], ["Medical", /./, "E1020"],
+  ["Lifts", /walkway/i, "D1030"], ["Lifts", /pneumatic|dock leveller|gantry|central vacuum/i, "D1050"], ["Lifts", /maintenance unit/i, "D1080"], ["Lifts", /./, "D1010"],
+  ["Controls", /./, "D8010"], ["Kitchen", /./, "E1050"],
+  ["Furniture and equipment", /laundry/i, "E1080"], ["Furniture and equipment", /fixed bench/i, "E2010"], ["Furniture and equipment", /access|ladder|height safety|work platform/i, "D1080"],
+  ["Furniture and equipment", /record|drawing|textile|sculpture|memorial|image|painting|mural|photograph|print|sound/i, "E2050"], ["Furniture and equipment", /./, "E1090"],
+  ["Grounds and structure", /door/i, "C1030"], ["Grounds and structure", /external building signage/i, "B2080"], ["Grounds and structure", /signage/i, "C1090"],
+  ["Grounds and structure", /gym|fitness|playground|sports|water play/i, "E1070"], ["Grounds and structure", /./, ""],
+  ["Security", /cctv/i, "D7030"], ["Security", /duress/i, "D7050"], ["Security", /intercom/i, "D6030"], ["Security", /./, "D7010"],
+  ["Communications", /radio|paging/i, "D6020"], ["Communications", /antenna system/i, "D6060"], ["Communications", /./, "D6030"],
+  ["Vehicles", /./, "E1010"],
+];
+async function autoClass(){
+  if (!cur || !F.cls || !cur.atype || (cur.cls && !aiFilled.has("cls"))) return;
+  const forKey = cur.key, [T, C] = await Promise.all([loadList("types"), loadList(F.cls.src)]);
+  if (!cur || cur.key!==forKey || !T.meta) return;
+  const meta = T.meta.find(o => o.t===cur.atype); if (!meta) return;
+  const rule = CLASS_RULES.find(([g, re]) => g===meta.g && re.test(meta.t)); if (!rule || !rule[2]) return;
+  const hit = C.raw.find(o => o.toUpperCase().startsWith(rule[2]+" - ")); if (!hit || cur.cls===hit) return;
+  cur.cls = hit; aiFilled.add("cls"); dirty = true;
+  if (!$("view-edit").hidden) renderForm();
+}
+// The same serial number, bar code or asset ID already captured?
+function dupOf(r){
+  const same = (a,b) => { a = String(a||"").trim().toUpperCase(); return a && a!=="NIL" && a===String(b||"").trim().toUpperCase(); };
+  for (let i=0;i<records.length;i++) { const o = records[i]; if (o.key===r.key) continue;
+    const why = same(r.serial,o.serial) ? "serial number" : same(r.barcode,o.barcode) ? "bar code" : same(r.id,o.id) ? "asset ID" : "";
+    if (why) return {why, n:String(i+1).padStart(3,"0"), name:o.name || [o.make,o.model].filter(Boolean).join(" ") || "unnamed"}; }
+  return null;
+}
 const specSrc = () => (F.spec && F.spec.src) || "none";
 
 /* ---------- tiny helpers ---------- */
@@ -407,7 +451,7 @@ const timeout = (p, ms) => Promise.race([p, new Promise((_,rej)=>setTimeout(()=>
 const lists = {};
 /* The lists are built into the app in encrypted form (data.bin). An access code, normally delivered inside an
    invitation link, unlocks them once; after that they are kept on the phone. Nothing in the app can change them. */
-const PACK_VERSION = "2026-11-17a";
+const PACK_VERSION = "2026-11-17b";
 const cleanCode = c => String(c||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
 const savedCode = () => { try { return localStorage.getItem("pmbh-code")||""; } catch(e) { return ""; } };
 async function fetchPack(code){
@@ -562,7 +606,7 @@ function renderList(){
         el("div",{class:"name",text:r.name || [r.make,r.model].filter(Boolean).join(" ") || "Unnamed asset"}),
         el("div",{class:"sub",text:[[r.make,r.model].filter(Boolean).join(" "), r.serial&&"S/N "+r.serial, r.id&&"ID "+r.id].filter(Boolean).join("  ·  ") || "No make, model or serial yet"}),
         loc ? el("div",{class:"sub",text:loc}) : null,
-        el("div",{style:"display:flex;gap:6px;flex-wrap:wrap;margin-top:2px"}, m.length ? el("span",{class:"chip warn",text:needText(r,m)}) : el("span",{class:"chip good",text:"Ready"}), el("span",{class:"chip",text:defsOf(r).tpl.title}))),
+        el("div",{style:"display:flex;gap:6px;flex-wrap:wrap;margin-top:2px"}, m.length ? el("span",{class:"chip warn",text:needText(r,m)}) : el("span",{class:"chip good",text:"Ready"}), el("span",{class:"chip",text:defsOf(r).tpl.title}), dupOf(r) ? el("span",{class:"chip bad",text:"Same "+dupOf(r).why+" as "+dupOf(r).n}) : null)),
       el("div",{class:"num",text:String(i+1).padStart(3,"0")})));
   });
   if (records.length && !shown) list.append(el("div",{class:"note",text:"No asset matches that search.",style:"padding:12px 4px"}));
@@ -593,7 +637,8 @@ function renderTplPick(){
     if (cur.tpl===t.id) return;
     cur.tpl = t.id; setTemplate(t.id); try { localStorage.setItem("pmbh-tpl", t.id); } catch(e) {}
     specSugg = []; dirty = true; if (!cur.nameManual) cur.name = buildName(cur);
-    renderTplPick(); renderForm(); if (cur.make || cur.model) queueSugg(); }}));
+    if (aiFilled.has("cls")) { delete cur.cls; aiFilled.delete("cls"); }
+    renderTplPick(); renderForm(); autoClass(); if (cur.make || cur.model) queueSugg(); }}));
 }
 function stepState(i){
   const st = STEPS[i]; if (st.id==="photo") return cur.photos.length ? "done" : "";
@@ -621,7 +666,7 @@ function renderPhotos(){
 }
 function fieldNode(k){
   const f = F[k], id = "f-"+k;
-  const lab = el("label",{for:id}, f.label, f.req ? el("span",{class:"req",text:"required"}) : null, aiFilled.has(k) ? el("span",{class:"chip ai",text:"from photo"}) : null);
+  const lab = el("label",{for:id}, f.label, f.req ? el("span",{class:"req",text:"required"}) : null, aiFilled.has(k) ? el("span",{class:"chip ai",text:k==="cls"?"filled from the asset type":"from photo"}) : null);
   let ctl;
   const set = v => { cur[k] = v; dirty = true; aiFilled.delete(k);
     if (k==="name") cur.nameManual = v.trim() !== buildName(cur);
@@ -683,6 +728,8 @@ function renderForm(){
     if (st.id==="plate" && cur.photos.length) { const strip = el("div",{class:"strip",style:"margin:0 0 14px"});
       cur.photos.forEach((p,i) => { const im = el("img",{alt:"Photo "+(i+1)+". Tap to zoom",onclick:()=>openZoom(p,i)}); Store.photoUrl(p).then(u => { if (u) im.src = u; }); strip.append(im); });
       panel.append(strip); }
+    const dup = st.id==="plate" ? dupOf(cur) : null;
+    if (dup) panel.append(el("div",{class:"banner",style:"margin:0 0 14px",text:"Possible duplicate: asset "+dup.n+" ("+dup.name+") has the same "+dup.why+"."}));
     panel.append(el("div",{class:"fields"}, st.f.map(fieldNode))); form.append(panel);
   } else if (st.groups) {
     form.append(el("div",{class:"note",text:"Everything here is optional. Fill in what you know.",style:"margin:14px 4px 0"}));
@@ -778,7 +825,7 @@ async function applyRead(r, forKey){
   dirty = true;
   specSugg = suggestSpecs(L, cur.make, cur.model, cur.atype);
   if (got.length && step===0) { step = 1; window.scrollTo(0,0); }
-  renderForm();
+  renderForm(); autoClass();
   return got;
 }
 async function detectBarcode(blobs){
@@ -1085,7 +1132,7 @@ function openPicker(k){
     const input = el("input",{type:"search",id:"pick-q",placeholder:S.ph,autocomplete:"off","aria-label":S.ph});
     const res = el("div",{class:"results"});
     body.append(input, res);
-    const choose = v => { cur[k] = v; dirty = true; aiFilled.delete(k); if (NAMEPARTS.includes(k) && !cur.nameManual) cur.name = buildName(cur); if (k==="atype") queueSugg(); close(); renderForm(); };
+    const choose = v => { cur[k] = v; dirty = true; aiFilled.delete(k); if (NAMEPARTS.includes(k) && !cur.nameManual) cur.name = buildName(cur); if (k==="atype") { queueSugg(); autoClass(); } close(); renderForm(); };
     const L = await loadList(f.src);
     const show = v => (v.startsWith(S.strip)?v.slice(S.strip.length):v).trim();
     let group = "";
@@ -1111,7 +1158,8 @@ function openPicker(k){
         items = searchList(L, q);
         if (!items.length) res.append(el("div",{class:"note",text:"No match in the template list.",style:"padding:8px 0"}));
       }
-      for (const v of items) res.append(el("button",{type:"button",text:show(v),onclick:()=>choose(v)}));
+      const seen = new Set();
+      for (const v of items) { const key = show(v).replace(/\s+/g," ").toUpperCase(); if (seen.has(key)) continue; seen.add(key); res.append(el("button",{type:"button",text:show(v),onclick:()=>choose(v)})); }
       if (q && !items.some(v=>v.trim().toUpperCase()===q.toUpperCase())) res.append(el("button",{type:"button",class:"free",onclick:()=>choose(q)}, "Use “"+q+"” as typed", el("small",{text:S.free || "Not in the template list. The data load may reject it."})));
       if (cur[k]) res.append(el("button",{type:"button",class:"free",text:"Clear this field",onclick:()=>choose("")}));
     };
@@ -1131,12 +1179,14 @@ async function saveCur(){
     const i = records.findIndex(r=>r.key===rec.key); if (i>=0) records[i] = rec; else records.push(rec);
     removed.forEach(p=>Store.delPhoto(p));
     if (aiCtl) aiCtl.abort();
+    const dupNote = dupOf(rec);
     cur = null; renderList(); show("list");
     const m = missing(rec);
     if (!wasNew) toast(m.length ? "Saved. "+needText(rec,m)+"." : "Asset saved.");
     else openSheet("Asset saved", (body, close) => { const art = el("div",{class:"done-art"}); art.insertAdjacentHTML("beforeend", UI.check);
       body.append(art, el("p",{text:rec.name || [rec.make,rec.model].filter(Boolean).join(" ") || "Unnamed asset",style:"margin:0;text-align:center;font-weight:600"}),
         m.length ? el("div",{class:"banner",style:"margin:0",text:needText(rec,m)+". You can finish it later from the list."}) : "",
+        dupNote ? el("div",{class:"banner bad",style:"margin:0",text:"Possible duplicate: asset "+dupNote.n+" ("+dupNote.name+") has the same "+dupNote.why+"."}) : "",
         el("button",{type:"button",class:"btn primary block",onclick:()=>{ close(); openEdit(null); }}, "Add the next asset"),
         el("button",{type:"button",class:"btn block",text:"Back to the list",onclick:close})); });
   } catch(e) {
@@ -1235,7 +1285,7 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
-const APP_VERSION = "17 Nov 2026, build 8";
+const APP_VERSION = "17 Nov 2026, build 9";
 let installEvt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
