@@ -219,15 +219,32 @@ section.grp .fields{padding:0 16px 16px}
 .steps{margin:0;padding-left:20px;font-size:14px;display:flex;flex-direction:column;gap:6px}
 .done-art{width:72px;height:72px;border-radius:50%;background:var(--good-soft);color:var(--good);display:grid;place-items:center;margin:4px auto 0}
 .done-art svg{width:38px;height:38px}
+.lock{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding-top:24px;padding-bottom:24px}
+.lock h1{font-size:34px;font-weight:700}
+.lock p{margin:0;color:var(--muted);max-width:34ch}
+.lock input{width:100%;max-width:420px;min-height:52px;padding:10px 14px;border-radius:12px;border:1.5px solid var(--line);background:var(--surface);text-align:center}
+.lock .btn{max-width:420px}
+.lock #lock-err{color:var(--bad);min-height:1.4em}
 .toast{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);background:var(--plate);color:var(--plate-ink);padding:10px 16px;border-radius:999px;font-size:14px;z-index:40;max-width:90%;text-align:center;box-shadow:var(--shadow)}
 </style>
 </head>
 <body>
 
-<div id="view-list">
+<div id="view-lock" hidden>
+  <div class="wrap lock">
+    <img src="icon-192.png" alt="" class="logo" style="width:72px;height:72px;border-radius:18px">
+    <h1>Asset Capture</h1>
+    <p id="lock-msg">This app opens by invitation. Open the link you were sent, or paste the link or access code here.</p>
+    <input type="text" id="lock-code" placeholder="Access code or invitation link" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Access code or invitation link">
+    <button type="button" class="btn primary block" id="btn-unlock">Unlock</button>
+    <p class="note" id="lock-err" role="status"></p>
+  </div>
+</div>
+
+<div id="view-list" hidden>
   <header class="top"><div class="wrap row">
     <img src="icon-192.png" alt="" class="logo">
-    <div class="grow"><h1>Asset Capture</h1><p>PMBH building equipment · AFMO update</p></div>
+    <div class="grow"><h1>Asset Capture</h1><p>PMBH assets · AFMO data load</p></div>
     <button type="button" class="iconb" id="btn-help" aria-label="Setup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg></button>
   </div></header>
   <main class="wrap">
@@ -251,16 +268,16 @@ section.grp .fields{padding:0 16px 16px}
   </div><nav class="wrap stepper" id="stepper" aria-label="Capture steps"></nav></header>
   <main class="wrap editpad">
     <section class="panel" id="step-photo">
+      <div class="reader" id="tplpick" style="margin:0 0 14px"></div>
       <h2>Photograph the nameplate</h2>
       <div class="photos" id="photos"></div>
-      <div class="shoot" id="shoot"><span class="art"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l1.5-2.5h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span><b>Fill the frame with the plate</b><span>Square on and out of glare. Add the barcode sticker as a second photo.</span></div>
+      <div class="shoot" id="shoot"><span class="art"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l1.5-2.5h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span><b>Fill the frame with the plate</b><span>Square on and out of glare. Add the barcode sticker as a second photo. Keep people, patient details and screens out of the shot.</span></div>
       <div class="row2">
         <button type="button" class="btn primary" id="btn-cam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l1.5-2.5h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Take photo</button>
         <button type="button" class="btn" id="btn-gal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4z"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4 4 3 3-2 4 3"/></svg>From gallery</button>
       </div>
       <input type="file" id="in-cam" accept="image/*" capture="environment" hidden>
       <input type="file" id="in-gal" accept="image/*" multiple hidden>
-      <input type="file" id="in-lists" accept=".json,application/json" hidden>
       <div class="reader" id="reader"></div>
     </section>
     <div id="readbox">
@@ -283,68 +300,62 @@ section.grp .fields{padding:0 16px 16px}
 <script src="lib/jszip.min.js"></script>
 <script>
 "use strict";
-/* ---------- template definition (column order of "triBuildingEquipment Data") ---------- */
-const HEADERS = ["CSTDCRECORDIDTX","TRIIDTX","TRINAMETX","TRISERIALNUMTX","TRIBARCODEENTRYTX","TRIPRIMARYORGANIZATI","CSTOPERATORTX","TRIPRIMARYLOCATIONTX","CSTEQUIPMENTPOSITIONTX","CSTFIXEDORMOBILELI","TRISPECNAMETX","TRIBUILDINGSYSTEMCL","CSTASSETOWNERSHIPSTATU","CSTASSETOWNERSHIPTYPEC","TRIACTIVESTARTDA","CSTMANUFACTUREDATEDA","CSTWARRANTYSTARTDATEDA","CSTWARRANTYEXPIRESDA","TRIPONUMTX","TRIPURCHASECOSTNU","CSTSUPPLIERTX","TRILIFEEXPECTANCYDU","CSTASSETCRITICALITYLI","CSTOPERATINGENVIRONMEN","CSTASSETUTILISATIONLI","TRICONDITIONLI","CSTCONDITIONDA","CSTCONDITIONASSESSMENT","TRICURRENTREPLACEMEN","CSTMAINTENANCETYPELI","TRIMAINTENANCEPRIORI","CSTMAINTENANCESTRATEGY","CSTSERVICEAGENTTX","CSTDCPARENTRECORDIDTX","MARK_TO_IGNORE_FOR_UPLOAD","VALIDATION_ERRORS"];
-const OWN = ["Borrowed","Consumables Lease","Donated","Government Grant","Leased","Not Owned","Owned","Purchased","Rented"];
-// k = key in a saved asset, col = column in the data sheet (absent = capture log only)
-const F = {
-  id:{label:"Asset ID",col:"TRIIDTX",type:"text",max:700,hint:"The existing AFMO asset number"},
+/* ---------- asset categories: each one comes from an AFMO data load template held in the built-in lists ---------- */
+// AFM field name -> short key used in saved assets (anything not listed keeps its AFM field name)
+const KEYS = {triIdTX:"id",triNameTX:"name",triSerialNumTX:"serial",triBarCodeEntryTX:"barcode",triPrimaryOrganizationTX:"org",cstOperatorTX:"operator",triPrimaryLocationTX:"location",cstEquipmentPositionTX:"position",cstFixedORMobileLI:"fixed",triSpecNameTX:"spec",triBuildingSystemCL:"cls",cstAssetOwnershipStatusCL:"ownStatus",cstAssetOwnershipTypeCL:"ownType",triActiveStartDA:"inService",cstManufactureDateDA:"mfgDate",cstWarrantyStartDateDA:"warrStart",cstWarrantyExpiresDA:"warrEnd",triPONumTX:"po",triPurchaseCostNU:"cost",cstSupplierTX:"supplier",triLifeExpectancyDU:"life",cstAssetCriticalityLI:"criticality",cstOperatingEnvironmentLI:"env",cstAssetUtilisationLI:"util",triConditionLI:"condition",cstConditionDA:"assessDate",cstConditionAssessmentCommentsTX:"comments",triCurrentReplacementValueNU:"replValue",cstMaintenanceTypeLI:"maintType",triMaintenancePriorityCL:"maintPriority",cstMaintenanceStrategyLI:"maintStrategy",cstServiceAgentTX:"agent"};
+const SKIP = new Set(["cstDCRecordIdTX","cstDCParentRecordIdTX"]);
+const HINT = {id:"The existing AFMO asset number",position:"e.g. plant room north wall, roof above theatre 2",name:"Built as asset type - service area - asset label - capacity, following the HI naming guide. The brand is not part of the name."};
+const SCALE = {criticality:[1,3,4,5],env:[1,3,5],util:[0,0,0],condition:[1,2,3,4,5]};
+const LABELS = {id:"Asset ID",life:"Life expectancy",cstDCAssessedByTX:"Assessed by",fixed:"Fixed or mobile?",barcode:"Bar code",spec:"Specification name",operator:"Operator (cost code)",serial:"Serial number",location:"Primary location"};
+const CAPTURE = {   // captured for every category; kept in the capture log sheet, not in the data load columns
   atype:{label:"Asset type",type:"pick",src:"types"},
   area:{label:"Service area",type:"text",hint:"Ward, department or block, e.g. ICU, West Block"},
   label:{label:"Asset label",type:"text",hint:"The local label on the asset, e.g. FCU2, Chiller 1, DB20"},
   cap:{label:"Capacity, energy source or utility type",type:"text",hint:"e.g. 5000L, Natural Gas, Essential Power, 250kg"},
-  name:{label:"Name",col:"TRINAMETX",type:"text",max:150,req:true,hint:"Built as asset type - service area - asset label - capacity, following the HI naming guide. The brand is not part of the name."},
-  serial:{label:"Serial number",col:"TRISERIALNUMTX",type:"text",max:700},
-  barcode:{label:"Bar code",col:"TRIBARCODEENTRYTX",type:"text",max:700},
   make:{label:"Make",type:"text"},
   model:{label:"Model",type:"text"},
-  spec:{label:"Specification name",col:"TRISPECNAMETX",type:"pick",src:"specs",req:true,max:150},
-  cls:{label:"Building system class",col:"TRIBUILDINGSYSTEMCL",type:"pick",src:"classes"},
-  mfgDate:{label:"Manufacture date",col:"CSTMANUFACTUREDATEDA",type:"date"},
-  location:{label:"Primary location",col:"TRIPRIMARYLOCATIONTX",type:"pick",src:"locations"},
-  position:{label:"Equipment position",col:"CSTEQUIPMENTPOSITIONTX",type:"text",max:250,hint:"e.g. plant room north wall, roof above theatre 2"},
-  fixed:{label:"Fixed or mobile?",col:"CSTFIXEDORMOBILELI",type:"select",opts:["Fixed","Mobile"],icons:["fixed","mobile"]},
-  org:{label:"Organization",col:"TRIPRIMARYORGANIZATI",type:"pick",src:"orgs"},
-  operator:{label:"Operator (cost code)",col:"CSTOPERATORTX",type:"pick",src:"costcodes"},
-  ownStatus:{label:"Ownership status",col:"CSTASSETOWNERSHIPSTATU",type:"select",opts:OWN},
-  ownType:{label:"Ownership type",col:"CSTASSETOWNERSHIPTYPEC",type:"select",opts:OWN},
-  inService:{label:"In service date",col:"TRIACTIVESTARTDA",type:"date"},
-  warrStart:{label:"Warranty start date",col:"CSTWARRANTYSTARTDATEDA",type:"date"},
-  warrEnd:{label:"Warranty expiration date",col:"CSTWARRANTYEXPIRESDA",type:"date"},
-  po:{label:"PO number",col:"TRIPONUMTX",type:"text",max:700},
-  cost:{label:"Purchase cost",col:"TRIPURCHASECOSTNU",type:"number"},
-  supplier:{label:"Supplier",col:"CSTSUPPLIERTX",type:"text",max:150},
-  life:{label:"Life expectancy",col:"TRILIFEEXPECTANCYDU",type:"text"},
-  criticality:{label:"Asset criticality",col:"CSTASSETCRITICALITYLI",type:"select",opts:["1 - Low","2 - Medium","3 - High","4 - Extreme"],scale:[1,3,4,5]},
-  env:{label:"Operating environment",col:"CSTOPERATINGENVIRONMEN",type:"select",opts:["1 - Good","2 - Normal","3 - Poor"],scale:[1,3,5]},
-  util:{label:"Asset utilisation",col:"CSTASSETUTILISATIONLI",type:"select",opts:["1 - Low","2 - Normal","3 - High"],scale:[0,0,0]},
-  condition:{label:"Asset condition",col:"TRICONDITIONLI",type:"select",opts:["1 - Excellent","2 - Good","3 - Fair","4 - Poor","5 - Defective"],scale:[1,2,3,4,5]},
-  assessDate:{label:"Assessment date",col:"CSTCONDITIONDA",type:"date"},
-  comments:{label:"Condition assessment comments",col:"CSTCONDITIONASSESSMENT",type:"textarea",max:1000},
-  replValue:{label:"Replacement value",col:"TRICURRENTREPLACEMEN",type:"number"},
-  maintType:{label:"Maintenance type",col:"CSTMAINTENANCETYPELI",type:"select",opts:["Non Statutory","Statutory"]},
-  maintPriority:{label:"Maintenance priority",col:"TRIMAINTENANCEPRIORI",type:"select",opts:["Contract Change","Emergency","High","Low","Medium","New Lease","Update Lease","Urgent"]},
-  maintStrategy:{label:"Maintenance strategy",col:"CSTMAINTENANCESTRATEGY",type:"select",opts:["Condition","Preventative Maintenance","Run to Fail"]},
-  agent:{label:"Service agent",col:"CSTSERVICEAGENTTX",type:"text",max:150},
   notes:{label:"Other nameplate details",type:"textarea",hint:"Kept in the capture log sheet, not in the data load"},
 };
-const STEPS = [
-  {id:"photo",t:"Photo"},
-  {id:"plate",t:"Plate",h:"Check what was read",sub:"Compare each value with the plate. Tap a photo to zoom in.",f:["make","model","serial","mfgDate","spec","barcode","id","notes"]},
-  {id:"asset",t:"Asset",h:"What is it, and where?",sub:"The name is built for you from the first four answers.",f:["atype","area","label","cap","name","location","position","fixed"]},
-  {id:"cond",t:"Condition",h:"What condition is it in?",sub:"Tap one in each row. All optional.",f:["condition","criticality","env","util","assessDate","comments"]},
-  {id:"more",t:"More",groups:[
-    {t:"Organisation and class",f:["org","operator","cls"]},
-    {t:"Ownership and dates",f:["ownStatus","ownType","inService","warrStart","warrEnd"]},
-    {t:"Purchase and value",f:["po","cost","supplier","replValue","life"]},
-    {t:"Maintenance",f:["maintType","maintPriority","maintStrategy","agent"]}]},
-];
+let PACK = null, F = {}, STEPS = [], TPL = null;
+const defCache = {};
+function defsFor(id){
+  const tpl = PACK.templates.find(t=>t.id===id) || PACK.templates[0];
+  if (defCache[tpl.id]) return defCache[tpl.id];
+  const Fm = Object.assign({}, CAPTURE), order = [];
+  for (const f of tpl.fields) {
+    if (SKIP.has(f.name) || !f.col) continue;
+    const key = KEYS[f.name] || f.name, size = parseInt(f.size,10) || undefined;
+    const d = {label:LABELS[key] || (f.label && f.label!=="NA" ? f.label : f.name), col:f.col, req:!!f.req, max:size, hint:HINT[key], group:(f.section && f.section!=="NA") ? f.section : "Other", tab:f.tab};
+    if (f.opts && f.opts.length && f.opts.length<=9) { d.type = "select"; d.opts = f.opts; if (SCALE[key]) d.scale = SCALE[key]; if (key==="fixed") d.icons = ["fixed","mobile"]; }
+    else if (f.opts && f.opts.length) { d.type = "pick"; d.src = "opt:"+tpl.id+":"+f.name; }
+    else if (f.locator && (PACK.lists[f.locator]||[]).length) { d.type = "pick"; d.src = f.locator; }
+    else if (f.type==="Date") d.type = "date";
+    else if (f.type==="Number") d.type = "number";
+    else d.type = (size>=1000 && !f.locator) ? "textarea" : "text";
+    Fm[key] = d; order.push(key);
+  }
+  const used = new Set(), take = ks => { const r = ks.filter(k => Fm[k] && !used.has(k)); r.forEach(k=>used.add(k)); return r; };
+  const plate = take(["make","model","serial","mfgDate","spec","barcode","id","notes"]);
+  const asset = take(["atype","area","label","cap","name","location","position","fixed"]);
+  const cond = take(["condition","criticality","env","util","assessDate","comments"].concat(order.filter(k=>Fm[k].tab==="Assessment")));
+  const groups = [];
+  for (const k of order) if (!used.has(k)) { let g = groups.find(g=>g.t===Fm[k].group); if (!g) groups.push(g = {t:Fm[k].group,f:[]}); g.f.push(k); }
+  const steps = [{id:"photo",t:"Photo"},
+    {id:"plate",t:"Plate",h:"Check what was read",sub:"Compare each value with the plate. Tap a photo to zoom in.",f:plate},
+    {id:"asset",t:"Asset",h:"What is it, and where?",sub:"The name is built for you from the first four answers.",f:asset},
+    {id:"cond",t:"Condition",h:"What condition is it in?",sub:"Tap one in each row. All optional.",f:cond},
+    {id:"more",t:"More",groups}];
+  return defCache[tpl.id] = {tpl, F:Fm, steps, req:Object.keys(Fm).filter(k=>Fm[k].req)};
+}
+const defsOf = r => defsFor((r && r.tpl) || "building");
+function setTemplate(id){ const d = defsFor(id); F = d.F; STEPS = d.steps; TPL = d.tpl; }
 const UI = {
   cam:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l1.5-2.5h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>', check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>', search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>',
 };
-const STICKY = ["location","area","org","operator","ownStatus","ownType","agent"];
+
+const STICKY = ["location","area","org","operator","ownStatus","ownType","agent","triCurrencyUO"];
 const NAMEPARTS = ["atype","area","label","cap"];
-const buildName = r => String(r.atype||"").trim() ? NAMEPARTS.map(k=>String(r[k]||"").trim()).filter(Boolean).join(" - ").slice(0,150) : "";
+const buildName = r => String(r.atype||"").trim() ? NAMEPARTS.map(k=>String(r[k]||"").trim()).filter(Boolean).join(" - ").slice(0,(defsOf(r).F.name||{}).max||150) : "";
 const SVG = d => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+d+'</svg>';
 const ICON = {
   fixed:SVG('<path d="M12 21s6-6 6-11a6 6 0 0 0-12 0c0 5 6 11 6 11z"/><circle cx="12" cy="10" r="2"/>'),
@@ -363,14 +374,15 @@ const ICON = {
   "Grounds and structure":SVG('<path d="M12 3l5 7h-3l4 6H6l4-6H7z"/><path d="M12 16v5"/>'),
   "Vehicles":SVG('<path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7z"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17.5" cy="17.5" r="1.8"/>'),
 };
-const SRC = {
-  specs:{file:"specs.json",title:"Specification",strip:"",ph:"Search make, model or type"},
-  locations:{file:"locations.json",title:"Primary location",strip:"\\Locations\\",ph:"Search building, level or room"},
-  orgs:{file:"orgs.json",title:"Organization",strip:"\\Organizations\\",ph:"Search department"},
-  costcodes:{file:"costcodes.json",title:"Operator (cost code)",strip:"",ph:"Search cost code"},
-  classes:{file:"classes.json",title:"Building system class",strip:"",ph:"Search class"},
-  types:{file:"assettypes.json",title:"Asset type",strip:"",ph:"Search asset type, e.g. scales, chiller, pump",free:"Not in the Asset Data Standard's asset type list."},
-};
+function srcInfo(src, f){
+  if (src==="types") return {title:"Asset type",strip:"",ph:"Search asset type, e.g. scales, chiller, pump",free:"Not in the Asset Data Standard's asset type list."};
+  if (src.startsWith("Location")) return {title:"Primary location",strip:"\\Locations\\",ph:"Search building, level or room"};
+  if (src==="Organization:triPathTX") return {title:"Organization",strip:"\\Organizations\\",ph:"Search department"};
+  if (src.startsWith("triCostCode")) return {title:"Operator (cost code)",strip:"",ph:"Search cost code"};
+  if (/Spec:/.test(src)) return {title:"Specification",strip:"",ph:"Search make, model or type"};
+  return {title:f ? f.label : "Choose",strip:"",ph:"Search"};
+}
+const specSrc = () => (F.spec && F.spec.src) || "none";
 
 /* ---------- tiny helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -392,26 +404,43 @@ const timeout = (p, ms) => Promise.race([p, new Promise((_,rej)=>setTimeout(()=>
 
 /* ---------- lookup lists ---------- */
 const lists = {};
-let packP = null;
-function getPack(){
-  return packP || (packP = (async () => {
-    await Store.ready;
-    let p = await Store.getKV("lists");
-    if (!p) { try { const r = await fetch("lists/pmbh-lists.json"); if (r.ok) { p = await r.json(); await Store.setKV("lists", p); } } catch(e) {} }
-    return p || null;
-  })());
+/* The lists are built into the app in encrypted form (data.bin). An access code, normally delivered inside an
+   invitation link, unlocks them once; after that they are kept on the phone. Nothing in the app can change them. */
+const PACK_VERSION = "2026-11-17a";
+const cleanCode = c => String(c||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+const savedCode = () => { try { return localStorage.getItem("pmbh-code")||""; } catch(e) { return ""; } };
+async function fetchPack(code){
+  let r; try { r = await fetch("data.bin?v="+PACK_VERSION,{cache:"no-cache"}); } catch(e) { throw {code:"net"}; }
+  if (!r.ok) throw {code:"net"};
+  const buf = new Uint8Array(await r.arrayBuffer()), salt = buf.slice(0,16), iv = buf.slice(16,28), ct = buf.slice(28);
+  const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(cleanCode(code)), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:200000,hash:"SHA-256"}, km, {name:"AES-GCM",length:256}, false, ["decrypt"]);
+  let plain; try { plain = await crypto.subtle.decrypt({name:"AES-GCM",iv}, key, ct); } catch(e) { throw {code:"bad"}; }
+  const p = JSON.parse(await new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream("gzip"))).text());
+  p.packVersion = PACK_VERSION; return p;
 }
+async function openPack(code){
+  let p = await Store.getKV("lists"); if (p && p.fmt!==2) p = null;
+  if (code) {
+    try { p = await fetchPack(code); await Store.setKV("lists", p); try { localStorage.setItem("pmbh-code", cleanCode(code)); } catch(e) {} }
+    catch(e) { if (!p) throw e; }
+    return p;
+  }
+  if (p && p.packVersion!==PACK_VERSION && savedCode() && Store.online()) refreshPack(savedCode());
+  return p;
+}
+async function refreshPack(code){
+  try { const p = await fetchPack(code); await Store.setKV("lists", p); toast("The lists were updated. Close and reopen the app to use them."); }
+  catch(e) { if (e && e.code==="bad") { await Store.setKV("lists", null); try { localStorage.removeItem("pmbh-code"); } catch(x) {} location.reload(); } }   // access was withdrawn
+}
+const getPack = () => Promise.resolve(PACK);
 function loadList(name){
-  if (!lists[name]) lists[name] = getPack().then(p => { const a = p && p[name]; if (!Array.isArray(a) || !a.length) throw 0;
+  if (!lists[name]) lists[name] = getPack().then(p => {
+      let a = !p ? null : name==="types" ? p.types : name.startsWith("opt:") ? ((p.templates.find(t=>t.id===name.split(":")[1])||{fields:[]}).fields.find(f=>f.name===name.split(":")[2])||{}).opts : p.lists[name];
+      if (!Array.isArray(a) || !a.length) throw 0;
       const raw = a.map(x => typeof x==="string" ? x : x.t); return {raw, up:raw.map(t => t.toUpperCase()), meta:typeof a[0]==="object" ? a : null}; })
     .catch(() => { lists[name] = null; return {raw:[], up:[], failed:true}; });
   return lists[name];
-}
-async function importLists(file){
-  let p; try { p = JSON.parse(await file.text()); } catch(e) { return toast("That file is not a lists file."); }
-  if (!p || !Array.isArray(p.specs) || !Array.isArray(p.locations)) return toast("That file is not a lists file.");
-  await Store.setKV("lists", p); packP = null; dictP = null; for (const k of Object.keys(lists)) delete lists[k];
-  $("sheets").replaceChildren(); renderList(); toast("Lists loaded: "+p.specs.length.toLocaleString()+" specifications, "+p.locations.length.toLocaleString()+" locations.");
 }
 const tokens = s => String(s||"").toUpperCase().split(/[^A-Z0-9.\-\/]+/).filter(Boolean);
 function searchList(L, q, limit=60){
@@ -496,8 +525,9 @@ let specExact = false;
 let records = [], cur = null, curIsNew = false, curAdded = [], aiFilled = new Set(), specSugg = [];
 let aiCtl = null, dirty = false;
 
-const missing = r => ["name","spec"].filter(k => !String(r[k]||"").trim());
-function show(view){ $("view-list").hidden = view!=="list"; $("view-edit").hidden = view!=="edit"; window.scrollTo(0,0); }
+const missing = r => defsOf(r).req.filter(k => !String(r[k]||"").trim());
+const needText = (r, m) => "Needs "+m.slice(0,2).map(k=>defsOf(r).F[k].label.toLowerCase()).join(" and ")+(m.length>2?" and "+(m.length-2)+" more":"");
+function show(view){ $("view-lock").hidden = view!=="lock"; $("view-list").hidden = view!=="list"; $("view-edit").hidden = view!=="edit"; window.scrollTo(0,0); }
 
 /* ---------- list view ---------- */
 let query = "";
@@ -508,7 +538,6 @@ function renderList(){
   stats.append(tile(records.length, records.length===1?"asset":"assets"), tile(records.length-need, "ready", records.length-need?"good":""), tile(need, "to finish", need?"warn":""));
   sum.append(el("span",{class:"chip",text:"Saved on this phone"}));
   if (installEvt && !isInstalled()) sum.append(el("button",{type:"button",class:"chip ai",style:"border:0;min-height:32px",text:"Install app",onclick:doInstall}));
-  getPack().then(p => { if (!p && !$("lists-warn")) sum.append(el("button",{type:"button",id:"lists-warn",class:"chip warn",style:"border:0;min-height:32px",text:"Lists not loaded. Tap to set up",onclick:openHelp})); });
   $("searchbox").hidden = records.length<4;
   if (!records.length) {
     const art = el("div",{class:"art"}); art.insertAdjacentHTML("beforeend", UI.cam);
@@ -532,7 +561,7 @@ function renderList(){
         el("div",{class:"name",text:r.name || [r.make,r.model].filter(Boolean).join(" ") || "Unnamed asset"}),
         el("div",{class:"sub",text:[[r.make,r.model].filter(Boolean).join(" "), r.serial&&"S/N "+r.serial, r.id&&"ID "+r.id].filter(Boolean).join("  ·  ") || "No make, model or serial yet"}),
         loc ? el("div",{class:"sub",text:loc}) : null,
-        el("div",{style:"display:flex;gap:6px;flex-wrap:wrap;margin-top:2px"}, m.length ? el("span",{class:"chip warn",text:"Needs "+m.map(k=>F[k].label.toLowerCase()).join(" and ")}) : el("span",{class:"chip good",text:"Ready"}))),
+        el("div",{style:"display:flex;gap:6px;flex-wrap:wrap;margin-top:2px"}, m.length ? el("span",{class:"chip warn",text:needText(r,m)}) : el("span",{class:"chip good",text:"Ready"}), el("span",{class:"chip",text:defsOf(r).tpl.title}))),
       el("div",{class:"num",text:String(i+1).padStart(3,"0")})));
   });
   if (records.length && !shown) list.append(el("div",{class:"note",text:"No asset matches that search.",style:"padding:12px 4px"}));
@@ -542,19 +571,28 @@ function renderList(){
 let step = 0;
 function openEdit(rec){
   curIsNew = !rec; curAdded = []; aiFilled = new Set(); specSugg = []; dirty = false;
-  if (rec) { cur = JSON.parse(JSON.stringify(rec)); if (cur.name && cur.name !== buildName(cur)) cur.nameManual = true; }
+  if (rec) { cur = JSON.parse(JSON.stringify(rec)); if (!cur.tpl) cur.tpl = "building"; setTemplate(cur.tpl); if (cur.name && cur.name !== buildName(cur)) cur.nameManual = true; }
   else {
-    cur = {key:newKey(), createdAt:new Date().toISOString(), photos:[]};
+    let tid = ""; try { tid = localStorage.getItem("pmbh-tpl")||""; } catch(e) {}
+    setTemplate(tid); cur = {key:newKey(), createdAt:new Date().toISOString(), photos:[], tpl:TPL.id};
     const last = records[records.length-1];
-    if (last) for (const k of STICKY) if (last[k]) cur[k] = last[k];
+    if (last) for (const k of STICKY) if (last[k] && F[k]) cur[k] = last[k];
     cur.name = buildName(cur);
   }
   step = curIsNew ? 0 : 1;
   $("rawtext").hidden = true; renderReader();
-  const carried = curIsNew ? STICKY.filter(k=>cur[k]).map(k=>F[k].label.toLowerCase()) : [];
+  const carried = curIsNew ? STICKY.filter(k=>cur[k] && F[k]).map(k=>F[k].label.toLowerCase()) : [];
   $("edit-sub").textContent = carried.length ? "Same "+carried.slice(0,2).join(" and ")+" as the last asset" : (curIsNew ? "Start with a photo of the plate" : "Asset "+String(records.findIndex(r=>r.key===cur.key)+1).padStart(3,"0"));
   $("form").replaceChildren();
-  setAi(null); renderPhotos(); renderForm(); show("edit");
+  setAi(null); renderTplPick(); renderPhotos(); renderForm(); show("edit");
+}
+function renderTplPick(){
+  const box = $("tplpick"); box.replaceChildren(el("span",{class:"lab",text:"Asset category"}));
+  for (const t of PACK.templates) box.append(el("button",{type:"button",class:"optb","aria-pressed":cur.tpl===t.id?"true":"false",text:t.title,onclick:()=>{
+    if (cur.tpl===t.id) return;
+    cur.tpl = t.id; setTemplate(t.id); try { localStorage.setItem("pmbh-tpl", t.id); } catch(e) {}
+    specSugg = []; dirty = true; if (!cur.nameManual) cur.name = buildName(cur);
+    renderTplPick(); renderForm(); if (cur.make || cur.model) queueSugg(); }}));
 }
 function stepState(i){
   const st = STEPS[i]; if (st.id==="photo") return cur.photos.length ? "done" : "";
@@ -598,7 +636,7 @@ function fieldNode(k){
   } else if (f.type==="textarea") {
     ctl = el("textarea",{id,maxlength:f.max,oninput:e=>set(e.target.value)}); ctl.value = cur[k]||"";
   } else if (f.type==="pick") {
-    const v = cur[k]||"", strip = SRC[f.src].strip;
+    const v = cur[k]||"", strip = srcInfo(f.src, f).strip;
     ctl = el("button",{type:"button",id,class:"pick",onclick:()=>openPicker(k)},
       el("span",{class:"val"+(v?"":" ph"),text: v ? (v.startsWith(strip)?v.slice(strip.length):v).trim() : "Tap to search"}), (() => { const g = el("span",{class:"go"}); g.insertAdjacentHTML("beforeend", UI.search); return g; })());
   } else {
@@ -617,7 +655,7 @@ function fieldNode(k){
 function fillSugg(box){
   box.replaceChildren();
   const have = String(cur.spec||"");
-  if (have && lists.specs && lists.specs.then) lists.specs.then(L => { if (!L.failed && cur.spec===have && !L.raw.includes(have) && !box.querySelector(".chip")) box.prepend(el("span",{class:"chip warn",text:"Not in the template's specification list"})); });
+  if (have) loadList(specSrc()).then(L => { if (!L.failed && cur.spec===have && !L.raw.includes(have) && !box.querySelector(".chip")) box.prepend(el("span",{class:"chip warn",text:"Not in the template's specification list"})); });
   const opts = specSugg.filter(s=>s!==have);
   if (opts.length) { box.append(el("div",{class:"cap",text:specExact?"This model in the template list":"Same make in the template list. The model was not found, so check before choosing."})); opts.forEach(s => box.append(el("button",{type:"button",text:s.trim(),onclick:()=>{ cur.spec=s; dirty=true; renderForm(); }}))); }
 }
@@ -628,7 +666,7 @@ function syncName(){
 let suggTimer;
 function queueSugg(){ clearTimeout(suggTimer); suggTimer = setTimeout(updateSugg, 350); }
 async function updateSugg(){
-  const L = await loadList("specs"); if (!cur) return;
+  const L = await loadList(specSrc()); if (!cur) return;
   specSugg = suggestSpecs(L, cur.make, cur.model, cur.atype);
   const box = $("spec-sugg"); if (box) fillSugg(box);
 }
@@ -712,10 +750,11 @@ function setAi(s){
 function readNameplate(){ if (!cur || !cur.photos.length) return; return (reader==="online" && onlineOk()) ? readOnline() : readDevice(); }
 
 // Makes and models already in AFM, taken from the template's specification list ("TYPE : MAKE : MODEL").
-let dictP = null;
+const dicts = {};
 const JUNK = /^(UNKNOWN|UNSPECIFIED|UNCLASSIFIED|N\/A|NA|NIL|TBA|TBC|VARIOUS|GENERIC|OTHER|NONE)$/i;
 function getDict(){
-  return dictP || (dictP = loadList("specs").then(L => { const makes = new Map();
+  const src = specSrc();
+  return dicts[src] || (dicts[src] = loadList(src).then(L => { const makes = new Map();
     for (const s of L.raw) { const p = s.split(" : ").map(x=>x.trim()); if (p.length<2) continue;
       const mk = p.length>=3 ? p[p.length-2] : p[1], md = p.length>=3 ? p[p.length-1] : "", key = mk.toUpperCase();
       if (key.length<3 || JUNK.test(key) || /^[\d\W]+$/.test(key)) continue;
@@ -728,12 +767,12 @@ async function applyRead(r, forKey){
   const g = k => (r && typeof r[k]==="string") ? r[k].trim() : "";
   const vals = {}; for (const [rk,k] of Object.entries(KEYMAP)) vals[k] = g(rk);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(vals.mfgDate)) vals.mfgDate = "";
-  const [T, dict, L] = await Promise.all([loadList("types"), getDict(), loadList("specs")]);
+  const [T, dict, L] = await Promise.all([loadList("types"), getDict(), loadList(specSrc())]);
   if (!cur || cur.key!==forKey) return null;
   if (vals.atype) { const i = T.up.indexOf(vals.atype.toUpperCase()); vals.atype = i>=0 ? T.raw[i] : ""; }
   if (vals.make && dict.has(vals.make.toUpperCase())) vals.make = dict.get(vals.make.toUpperCase()).name;   // spell it the way AFM already does
   const got = [];
-  for (const [k,v] of Object.entries(vals)) if (v && (!String(cur[k]||"").trim() || aiFilled.has(k))) { cur[k] = v; aiFilled.add(k); got.push(F[k].label.toLowerCase().replace(/,.*$/,"")); }
+  for (const [k,v] of Object.entries(vals)) if (v && F[k] && (!String(cur[k]||"").trim() || aiFilled.has(k))) { cur[k] = v; aiFilled.add(k); got.push(F[k].label.toLowerCase().replace(/,.*$/,"")); }
   if (!cur.nameManual) cur.name = buildName(cur);
   dirty = true;
   specSugg = suggestSpecs(L, cur.make, cur.model, cur.atype);
@@ -1021,7 +1060,7 @@ function confirmSheet(title, msg, yes, danger){
   });
 }
 function openPicker(k){
-  const f = F[k], S = SRC[f.src];
+  const f = F[k], S = srcInfo(f.src, f);
   openSheet(S.title, async (body, close) => {
     const input = el("input",{type:"search",id:"pick-q",placeholder:S.ph,autocomplete:"off","aria-label":S.ph});
     const res = el("div",{class:"results"});
@@ -1047,7 +1086,7 @@ function openPicker(k){
         const recent = [...new Set(records.map(r=>r[k]).filter(Boolean).reverse())].slice(0,8);
         items = k==="spec" && specSugg.length ? specSugg : recent;
         if (items.length) res.append(el("div",{class:"note",text:k==="spec"&&specSugg.length?"Closest matches for this make and model":"Used recently",style:"padding:4px 0"}));
-        else res.append(el("div",{class:"note",text: L.failed ? "Lists are not loaded yet. Open Setup on the first screen and load the lists file. Until then, type the value and use it as written." : "Type to search "+L.raw.length.toLocaleString()+" entries from the template.",style:"padding:8px 0"}));
+        else res.append(el("div",{class:"note",text: L.failed ? "There is no list for this field. Type the value and use it as written." : "Type to search "+L.raw.length.toLocaleString()+" entries.",style:"padding:8px 0"}));
       } else {
         items = searchList(L, q);
         if (!items.length) res.append(el("div",{class:"note",text:"No match in the template list.",style:"padding:8px 0"}));
@@ -1074,10 +1113,10 @@ async function saveCur(){
     if (aiCtl) aiCtl.abort();
     cur = null; renderList(); show("list");
     const m = missing(rec);
-    if (!wasNew) toast(m.length ? "Saved. Still needs "+m.map(k=>F[k].label.toLowerCase()).join(" and ")+"." : "Asset saved.");
+    if (!wasNew) toast(m.length ? "Saved. "+needText(rec,m)+"." : "Asset saved.");
     else openSheet("Asset saved", (body, close) => { const art = el("div",{class:"done-art"}); art.insertAdjacentHTML("beforeend", UI.check);
       body.append(art, el("p",{text:rec.name || [rec.make,rec.model].filter(Boolean).join(" ") || "Unnamed asset",style:"margin:0;text-align:center;font-weight:600"}),
-        m.length ? el("div",{class:"banner",style:"margin:0",text:"Still needs "+m.map(k=>F[k].label.toLowerCase()).join(" and ")+". You can finish it later from the list."}) : "",
+        m.length ? el("div",{class:"banner",style:"margin:0",text:needText(rec,m)+". You can finish it later from the list."}) : "",
         el("button",{type:"button",class:"btn primary block",onclick:()=>{ close(); openEdit(null); }}, "Add the next asset"),
         el("button",{type:"button",class:"btn block",text:"Back to the list",onclick:close})); });
   } catch(e) {
@@ -1100,24 +1139,27 @@ async function deleteCur(){
 /* ---------- export ---------- */
 const safe = s => String(s||"").replace(/[^A-Za-z0-9._-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40);
 const photoNames = (r,i) => (r.photos||[]).map((p,n) => String(i+1).padStart(3,"0")+"_"+(safe(r.barcode||r.id||r.serial||r.name)||"asset")+"_"+(n+1)+".jpg");
-function buildWorkbook(withPhotos){
-  const colKey = {}; for (const [k,f] of Object.entries(F)) if (f.col) colKey[f.col] = k;
-  const rows = [HEADERS];
-  records.forEach((r,i) => rows.push(HEADERS.map(h => {
-    if (h==="CSTDCRECORDIDTX") return String(i+1);
+const usedTemplates = () => PACK.templates.filter(t => records.some(r => defsOf(r).tpl.id===t.id));
+const xlsxName = t => "AFMO-"+t.form+"_PMBH_"+today()+".xlsx";
+function buildWorkbook(tpl, withPhotos){
+  const Ft = defsFor(tpl.id).F, colKey = {}; for (const [k,f] of Object.entries(Ft)) if (f.col) colKey[f.col] = k;
+  const mine = records.map((r,i)=>[r,i]).filter(([r]) => defsOf(r).tpl.id===tpl.id);
+  const rows = [tpl.headers];
+  mine.forEach(([r],n) => rows.push(tpl.headers.map(h => {
+    if (h==="CSTDCRECORDIDTX") return String(n+1);
     const k = colKey[h]; if (!k) return null;
     const v = r[k]; if (v==null || v==="") return null;
-    if (F[k].type==="date") { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v); return m ? {t:"n",v:(Date.UTC(+m[1],+m[2]-1,+m[3])-Date.UTC(1899,11,30))/864e5,z:"dd/mm/yyyy"} : String(v); }
-    if (F[k].type==="number") { const n = Number(v); return isFinite(n) ? n : String(v); }
+    if (Ft[k].type==="date") { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v); return m ? {t:"n",v:(Date.UTC(+m[1],+m[2]-1,+m[3])-Date.UTC(1899,11,30))/864e5,z:"dd/mm/yyyy"} : String(v); }
+    if (Ft[k].type==="number") { const x = Number(v); return isFinite(x) ? x : String(v); }
     return {t:"s",v:String(v)};
   })));
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["!cols"] = HEADERS.map(h => ({wch:Math.max(14,h.length+2)}));
-  const log = [["Record ID","Asset ID","Name","Asset type","Service area","Asset label","Capacity / energy / utility","Make","Model","Serial number","Other nameplate details","Photo files","Captured","Still missing"]];
-  records.forEach((r,i) => log.push([String(i+1), r.id||"", r.name||"", r.atype||"", r.area||"", r.label||"", r.cap||"", r.make||"", r.model||"", r.serial||"", r.notes||"", withPhotos ? photoNames(r,i).map(n=>"Photos/"+n).join("; ") : (r.photos||[]).length+" photo(s) in the app", (r.createdAt||"").slice(0,16).replace("T"," "), missing(r).map(k=>F[k].label).join(", ")]));
-  const ws2 = XLSX.utils.aoa_to_sheet(log); ws2["!cols"] = [10,14,34,24,16,14,20,18,22,22,44,44,18,22].map(w=>({wch:w}));
+  ws["!cols"] = tpl.headers.map(h => ({wch:Math.max(14,h.length+2)}));
+  const log = [["Row","Asset ID","Name","Asset type","Service area","Asset label","Capacity / energy / utility","Make","Model","Serial number","Other nameplate details","Photo files","Captured","Still missing"]];
+  mine.forEach(([r,i],n) => log.push([String(n+1), r.id||"", r.name||"", r.atype||"", r.area||"", r.label||"", r.cap||"", r.make||"", r.model||"", r.serial||"", r.notes||"", withPhotos ? photoNames(r,i).map(x=>"Photos/"+x).join("; ") : (r.photos||[]).length+" photo(s) in the app", (r.createdAt||"").slice(0,16).replace("T"," "), missing(r).map(k=>Ft[k].label).join(", ")]));
+  const ws2 = XLSX.utils.aoa_to_sheet(log); ws2["!cols"] = [8,14,34,24,16,14,20,18,22,22,44,44,18,22].map(w=>({wch:w}));
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "triBuildingEquipment Data");
+  XLSX.utils.book_append_sheet(wb, ws, tpl.sheet.slice(0,31));
   XLSX.utils.book_append_sheet(wb, ws2, "Capture Log");
   return new Blob([XLSX.write(wb,{type:"array",bookType:"xlsx"})],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
 }
@@ -1129,15 +1171,17 @@ async function saveFile(filename, blob){
   }
   const a = el("a",{href:URL.createObjectURL(blob),download:filename}); document.body.append(a); a.click(); a.remove();
 }
-const XLSX_NAME = () => "AFMO-triBuildingEquipment_Update_PMBH_"+today()+".xlsx";
 async function doExport(kind, btn, status){
   const label = btn.textContent; btn.disabled = true;
   try {
     if (typeof XLSX==="undefined" || (kind==="zip" && typeof JSZip==="undefined")) throw {code:"lib"};
     let blob, name, lost = 0;
-    if (kind==="xlsx") { blob = buildWorkbook(false); name = XLSX_NAME(); }
+    const used = usedTemplates();
+    if (kind==="xlsx" && used.length===1) { blob = buildWorkbook(used[0], false); name = xlsxName(used[0]); }
+    else if (kind==="xlsx") { const zip = new JSZip(); for (const t of used) zip.file(xlsxName(t), buildWorkbook(t, false));
+      blob = await zip.generateAsync({type:"blob",compression:"DEFLATE",mimeType:"application/zip"}); name = "PMBH Asset Capture "+today()+" Excel.zip"; }
     else {
-      const zip = new JSZip(); zip.file(XLSX_NAME(), buildWorkbook(true));
+      const zip = new JSZip(); for (const t of used) zip.file(xlsxName(t), buildWorkbook(t, true));
       const total = records.reduce((n,r)=>n+(r.photos||[]).length,0); let done = 0;
       for (let i=0;i<records.length;i++) { const names = photoNames(records[i],i);
         for (let n=0;n<names.length;n++) { status.textContent = "Collecting photo "+(++done)+" of "+total+"…"; const b = await Store.photoBlob(records[i].photos[n]); if (b) zip.file("Photos/"+names[n], b); else lost++; } }
@@ -1157,13 +1201,13 @@ function openExport(){
     if (!records.length) return body.append(el("p",{text:"Add at least one asset first.",style:"margin:0"}));
     const need = records.filter(r=>missing(r).length).length, nPhotos = records.reduce((n,r)=>n+(r.photos||[]).length,0);
     const status = el("div",{class:"note",role:"status"});
-    if (need) body.append(el("div",{class:"banner",style:"margin:0",text:need+" of "+records.length+" assets are missing a name or specification. The template will flag them when you validate."}));
+    if (need) body.append(el("div",{class:"banner",style:"margin:0",text:need+" of "+records.length+" assets are missing required answers. The template will flag them when you validate."}));
     const b1 = el("button",{type:"button",class:"btn primary block",text:"Save Excel and photos (ZIP)"}), b2 = el("button",{type:"button",class:"btn block",text:"Save Excel only"});
     b1.onclick = () => doExport("zip", b1, status); b2.onclick = () => doExport("xlsx", b2, status);
     body.append(
       el("div",{class:"opt"}, el("h3",{text:"Excel with a Photos folder"}), el("p",{text:records.length+" assets and "+nPhotos+" photos. Unzips to this layout:"}),
-        el("pre",{class:"tree",text:"PMBH Asset Capture "+today()+"/\n├─ "+XLSX_NAME()+"\n└─ Photos/\n   ├─ 001_<barcode>_1.jpg\n   └─ …"}), b1),
-      el("div",{class:"opt"}, el("h3",{text:"Excel only"}), el("p",{text:"One workbook. The first sheet has the 36 columns of triBuildingEquipment Data in template order; the second lists make, model and photo details."}), b2),
+        el("pre",{class:"tree",text:"PMBH Asset Capture "+today()+"/\n"+usedTemplates().map(t=>"├─ "+xlsxName(t)+"\n").join("")+"└─ Photos/\n   ├─ 001_<barcode>_1.jpg\n   └─ …"}), b1),
+      el("div",{class:"opt"}, el("h3",{text:"Excel only"}), el("p",{text: usedTemplates().length>1 ? "One workbook per asset category ("+usedTemplates().map(t=>t.title).join(", ")+"), zipped together. Each has that category's data sheet in template order, plus a capture log." : "One workbook. The first sheet is "+usedTemplates()[0].sheet+" in template order; the second lists make, model and photo details."}), b2),
       status,
       el("div",{class:"opt"}, el("h3",{text:"Clear the list"}), el("p",{text:"After the export is safely in OneDrive, remove these assets and photos to start the next batch."}),
         el("button",{type:"button",class:"btn danger block",text:"Delete all "+records.length+" assets",onclick:async()=>{ close(); if (!(await confirmSheet("Delete all assets?","All "+records.length+" assets and their photos are removed for good. Do this only after the export is saved.","Delete all",true))) return;
@@ -1171,7 +1215,7 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
-const APP_VERSION = "17 Nov 2026, build 5";
+const APP_VERSION = "17 Nov 2026, build 6";
 let installEvt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
@@ -1186,7 +1230,7 @@ async function doInstall(ev){
   else { btn.disabled = false; btn.textContent = label; toast("Not installed. Tap Install app to try again."); }
 }
 function installCard(){
-  const ua = navigator.userAgent, ios = /iPhone|iPad|iPod/.test(ua), card = el("div",{class:"opt"}, el("h3",{text:"2. Install on this phone"}));
+  const ua = navigator.userAgent, ios = /iPhone|iPad|iPod/.test(ua), card = el("div",{class:"opt"}, el("h3",{text:"Install on this phone"}));
   if (isInstalled()) card.append(el("div",{}, el("span",{class:"chip good",text:"Installed ✓"})), el("p",{text:"You are using the installed app."}));
   else if (installEvt) card.append(el("p",{text:"Puts the app on your home screen. It then opens full screen, with or without signal."}), el("button",{type:"button",class:"btn primary block",text:"Install app",onclick:doInstall}));
   else {
@@ -1207,11 +1251,10 @@ function openHelp(){
     const p = await getPack();
     const key = el("input",{type:"text",id:"ocr-key",placeholder:"Paste your Google AI Studio API key",autocomplete:"off",autocapitalize:"off",spellcheck:"false",style:"width:100%;min-height:48px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg)"}); key.value = onlineKey();
     body.append(
-      el("div",{class:"opt"}, el("h3",{text:"1. Lists file"}),
-        el("p",{text: p ? "Loaded: "+(p.specs||[]).length.toLocaleString()+" specifications, "+(p.locations||[]).length.toLocaleString()+" locations, "+(p.types||[]).length+" asset types."+(p.version?" Source: "+p.version+".":"") : "Not loaded. The searchable specifications, locations, organisations, cost codes and asset types come from the file pmbh-lists.json. Save it to this phone, then load it here. It stays on the phone."}),
-        el("button",{type:"button",class:"btn block"+(p?"":" primary"),text:p?"Replace the lists file":"Load the lists file",onclick:()=>$("in-lists").click()})),
+      el("div",{class:"opt"}, el("h3",{text:"Lists"}),
+        el("p",{text:"Built in: "+p.templates.map(t=>t.title).join(", ")+". "+(p.version||"")+". They cannot be changed from the app; updates come from the app's owner."})),
       installCard(),
-      el("div",{class:"opt"}, el("h3",{text:"3. Online OCR (optional)"}),
+      el("div",{class:"opt"}, el("h3",{text:"Online OCR (optional)"}),
         el("p",{text: onlineKey() ? "Set up on this phone. Online OCR is stronger on worn or stamped plates and also suggests the asset type. It sends the photo to Google (Gemini), so check that is acceptable for your site." : "The on-phone reader needs nothing. Online OCR is stronger on worn or stamped plates and also suggests the asset type. It sends the photo to Google (Gemini), so check that is acceptable for your site. It needs an API key from Google AI Studio (aistudio.google.com)."}),
         key,
         el("button",{type:"button",class:"btn block",text:"Save key",onclick:()=>{ try { localStorage.setItem("pmbh-ocrkey", key.value.trim()); localStorage.removeItem("pmbh-ocrmodel"); } catch(e) {} if (!key.value.trim() && reader==="online") reader = "device"; renderReader(); toast(key.value.trim() ? "Online OCR key saved on this phone." : "Online OCR key removed."); }})),
@@ -1220,7 +1263,7 @@ function openHelp(){
       el("div",{class:"opt"}, el("h3",{text:"Getting the Excel into OneDrive"}),
         el("ol",{class:"steps"},
           el("li",{text:"Tap Export Excel, then choose OneDrive in the share screen and pick Asset Validation › PMBH › Asset Update Data load. It syncs to the same folder on your computer."}),
-          el("li",{text:"Open the export, copy the rows under the header on the first sheet, and paste them into row 2 of triBuildingEquipment Data in the .xlsm template."}),
+          el("li",{text:"Open the export, copy the rows under the header on the first sheet, and paste them into row 2 of the matching Data sheet in that category's .xlsm template."}),
           el("li",{text:"Press Ctrl-Shift-V to validate, then continue the data load as usual."}))),
       el("div",{class:"note",text:"Version "+APP_VERSION+". Updates arrive by themselves the next time the app is opened with signal. Nothing needs reinstalling."}));
   });
@@ -1236,7 +1279,6 @@ $("btn-next").onclick = () => step===STEPS.length-1 ? saveCur() : goStep(step+1)
 let qT; $("q").addEventListener("input", e => { clearTimeout(qT); qT = setTimeout(() => { query = e.target.value; renderList(); }, 150); });
 $("btn-save").onclick = saveCur; $("btn-delete").onclick = deleteCur;
 $("btn-cam").onclick = () => $("in-cam").click(); $("btn-gal").onclick = () => $("in-gal").click();
-$("in-lists").addEventListener("change", e => { const f = e.target.files[0]; e.target.value = ""; if (f) importLists(f); });
 for (const id of ["in-cam","in-gal"]) $(id).addEventListener("change", e => { const fl = [...e.target.files]; e.target.value = ""; addFiles(fl); });
 
 async function loadRecords(){
@@ -1259,18 +1301,30 @@ async function doSync(say){
   } catch(e) {} finally { syncing = false; }
 }
 window.addEventListener("online", () => doSync(false));
-(async function start(){
-  $("summary").append(el("span",{class:"chip",text:"Opening your asset list…"}));
-  const hk = /[#&]key=([^&]+)/.exec(location.hash);
-  if (hk) { try { localStorage.setItem("pmbh-ocrkey", decodeURIComponent(hk[1])); localStorage.setItem("pmbh-reader","online"); localStorage.removeItem("pmbh-ocrmodel"); reader = "online"; } catch(e) {}
-    history.replaceState(null, "", location.pathname + location.search); setTimeout(() => toast("Online OCR is set up on this phone."), 800); }
-  Store.ready = Store.init();
-  for (const n of Object.keys(SRC)) loadList(n);
-  renderReader();
-  await Store.ready;
+async function boot(){
+  setTemplate(""); show("list"); renderReader();
   await loadRecords();
+  setTimeout(() => { getOcr().catch(()=>{}); }, 2500);   // have the on-phone reader ready before it is needed
+}
+const lockErr = e => { const c = e && e.code; return c==="bad" ? "That code was not accepted. Check the link you were sent." : c==="net" ? "No connection. Connect once to unlock; after that the app works offline." : "This phone could not unlock the app. Update the browser and try again."; };
+$("btn-unlock").onclick = async () => {
+  const raw = $("lock-code").value.trim(), m = /code=([^&\s]+)/.exec(raw), code = m ? decodeURIComponent(m[1]) : raw, btn = $("btn-unlock");
+  if (!cleanCode(code)) return;
+  btn.disabled = true; btn.textContent = "Unlocking…"; $("lock-err").textContent = "";
+  try { PACK = await openPack(code); if (PACK) return boot(); $("lock-err").textContent = lockErr(); }
+  catch(e) { $("lock-err").textContent = lockErr(e); }
+  finally { btn.disabled = false; btn.textContent = "Unlock"; }
+};
+(async function start(){
+  const hk = /[#&]key=([^&]+)/.exec(location.hash), hc = /[#&]code=([^&]+)/.exec(location.hash);
+  if (hk) { try { localStorage.setItem("pmbh-ocrkey", decodeURIComponent(hk[1])); localStorage.setItem("pmbh-reader","online"); localStorage.removeItem("pmbh-ocrmodel"); reader = "online"; } catch(e) {} }
+  if (hk || hc) history.replaceState(null, "", location.pathname + location.search);
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
-  setTimeout(() => { getOcr().catch(()=>{}); getDict(); }, 2500);   // have the on-phone reader ready before it is needed
+  Store.ready = Store.init(); await Store.ready;
+  try { PACK = await openPack(hc ? decodeURIComponent(hc[1]) : ""); } catch(e) { show("lock"); $("lock-err").textContent = lockErr(e); return; }
+  if (!PACK) return show("lock");
+  await boot();
+  if (hc) toast("Unlocked. The lists are now on this phone.");
 })();
 </script>
 </body>
