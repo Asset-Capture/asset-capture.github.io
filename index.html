@@ -1215,7 +1215,7 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
-const APP_VERSION = "17 Nov 2026, build 6";
+const APP_VERSION = "17 Nov 2026, build 7";
 let installEvt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
@@ -1251,8 +1251,6 @@ function openHelp(){
     const p = await getPack();
     const key = el("input",{type:"text",id:"ocr-key",placeholder:"Paste your Google AI Studio API key",autocomplete:"off",autocapitalize:"off",spellcheck:"false",style:"width:100%;min-height:48px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg)"}); key.value = onlineKey();
     body.append(
-      el("div",{class:"opt"}, el("h3",{text:"Lists"}),
-        el("p",{text:"Built in: "+p.templates.map(t=>t.title).join(", ")+". "+(p.version||"")+". They cannot be changed from the app; updates come from the app's owner."})),
       installCard(),
       el("div",{class:"opt"}, el("h3",{text:"Online OCR (optional)"}),
         el("p",{text: onlineKey() ? "Set up on this phone. Online OCR is stronger on worn or stamped plates and also suggests the asset type. It sends the photo to Google (Gemini), so check that is acceptable for your site." : "The on-phone reader needs nothing. Online OCR is stronger on worn or stamped plates and also suggests the asset type. It sends the photo to Google (Gemini), so check that is acceptable for your site. It needs an API key from Google AI Studio (aistudio.google.com)."}),
