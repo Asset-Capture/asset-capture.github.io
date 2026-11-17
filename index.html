@@ -133,7 +133,7 @@ h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;letter-spacing:.0
 /* capture */
 .editpad{padding-bottom:130px}
 .panel{background:var(--surface);border-radius:var(--r);box-shadow:var(--shadow);padding:16px;margin-top:14px}
-.panel>h2{font-size:24px;font-weight:700;line-height:1.1}
+.panel>h2{font-size:24px;font-weight:700;line-height:1.1;scroll-margin-top:140px}
 .panel>.note{margin:4px 0 14px}
 .shoot{border:2px dashed var(--line);border-radius:var(--r);padding:22px 14px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px;margin:12px 0}
 .shoot .art{width:72px;height:72px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center}
@@ -147,6 +147,7 @@ h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;letter-spacing:.0
 .strip{display:flex;gap:8px;align-items:center;overflow-x:auto;margin-top:14px}
 .strip img{width:64px;height:64px;object-fit:cover;border-radius:10px;border:1px solid var(--line);cursor:zoom-in;flex:none}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row2 .btn{padding:10px 8px;gap:6px;white-space:nowrap;font-size:15px}
 .aistatus{display:flex;flex-wrap:wrap;align-items:center;gap:10px;border-radius:var(--r);padding:12px;background:var(--ai-soft);color:var(--ai);font-size:14px;margin-top:14px}
 .aistatus.bad{background:var(--bad-soft);color:var(--bad)}
 .aistatus .grow{flex:1;min-width:60%}
@@ -616,7 +617,7 @@ function renderPhotos(){
     }})));
   });
   box.hidden = !cur.photos.length; $("shoot").hidden = !!cur.photos.length;
-  if ($("stepper").children.length) renderStepper();
+  if ($("stepper").children.length) { renderStepper(); if (STEPS[step].id==="photo") $("btn-next").textContent = cur.photos.length ? "Next: "+STEPS[1].t : "Skip photo"; }
 }
 function fieldNode(k){
   const f = F[k], id = "f-"+k;
@@ -954,8 +955,8 @@ async function shrinkFor(blob, maxBytes){
 const toB64 = blob => new Promise((res,rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1]); fr.onerror = rej; fr.readAsDataURL(blob); });
 // Model names change over time, so ask the service which fast vision model this key can use and remember it for the day.
 async function pickModel(signal){
-  try { const c = JSON.parse(localStorage.getItem("pmbh-ocrmodel")||"null"); if (c && c.day===today() && c.name) return c.name; } catch(e) {}
-  let name = "gemini-flash-latest";
+  try { const c = JSON.parse(localStorage.getItem("pmbh-ocrmodel")||"null"); if (c && c.day===today() && Array.isArray(c.names) && c.names.length) return c.names; } catch(e) {}
+  let names = ["gemini-flash-latest"];
   try {
     const r = await fetch(GAPI+"models?pageSize=200",{headers:{"x-goog-api-key":onlineKey()},signal});
     if (r.status===400 || r.status===401 || r.status===403) throw {code:"key"};
@@ -964,11 +965,13 @@ async function pickModel(signal){
       const ver = n => parseFloat((/gemini-(\d+(?:\.\d+)?)/.exec(n)||[])[1]||"0");
       const stable = ms.filter(n => /^gemini-\d+(\.\d+)?-flash$/.test(n)).sort((a,b)=>ver(b)-ver(a));
       const anyFlash = ms.filter(n => /^gemini-[\d.]+-flash/.test(n) && !/lite|image|tts|live|audio|native|thinking/.test(n)).sort((a,b)=>ver(b)-ver(a));
-      name = stable[0] || (ms.includes("gemini-flash-latest") ? "gemini-flash-latest" : anyFlash[0]) || name;
+      const lite = ms.filter(n => /^gemini-\d+(\.\d+)?-flash-lite$/.test(n)).sort((a,b)=>ver(b)-ver(a));
+      const list = [...stable.slice(0,2), ...lite.slice(0,1), ...(ms.includes("gemini-flash-latest") ? ["gemini-flash-latest"] : []), ...anyFlash.slice(0,1)];
+      if (list.length) names = [...new Set(list)];
     }
   } catch(e) { if (e && (e.code==="key" || e.name==="AbortError")) throw e; }
-  try { localStorage.setItem("pmbh-ocrmodel", JSON.stringify({day:today(), name})); } catch(e) {}
-  return name;
+  try { localStorage.setItem("pmbh-ocrmodel", JSON.stringify({day:today(), names})); } catch(e) {}
+  return names;
 }
 const promptFor = (nFull, types) => `You are reading photos taken during an asset validation at an Australian public hospital (NSW Health). The assets are building and facility plant (air handling units, fan coil units, chillers, split systems, pumps, boilers, hot water units, thermostatic mixing valves, switchboards and distribution boards, generators, UPS, fire panels, extinguishers, hose reels, lifts, medical gas plant, kitchen and laundry equipment) and some medical equipment (patient scales, beds, patient lifters, sterilisers, examination tables).
 
@@ -1012,15 +1015,27 @@ async function readOnline(){
   try {
     const blobs = (await Promise.all(cur.photos.slice(-3).map(p=>Store.photoBlob(p)))).filter(Boolean);
     if (!blobs.length) throw {code:"photo"};
-    const [T, model] = await Promise.all([loadList("types"), pickModel(ctl.signal)]);
+    const [T, models] = await Promise.all([loadList("types"), pickModel(ctl.signal)]);
     const parts = [{text:promptFor(blobs.length, T.raw)}];
     for (const b of blobs) parts.push({inline_data:{mime_type:"image/jpeg", data:await toB64(await shrinkFor(b, 3500000))}});
     const call = async m => fetch(GAPI+"models/"+m+":generateContent",{method:"POST",signal:ctl.signal,headers:{"Content-Type":"application/json","x-goog-api-key":onlineKey()},
       body:JSON.stringify({contents:[{role:"user",parts}],generationConfig:{temperature:0,responseMimeType:"application/json"}})});
-    let r = await call(model);
-    if (r.status===404 && model!=="gemini-flash-latest") { try { localStorage.removeItem("pmbh-ocrmodel"); } catch(e) {} r = await call("gemini-flash-latest"); }
-    if (!r.ok) { let m = ""; try { m = ((await r.json()).error||{}).message||""; } catch(e) {}
-      throw {code: r.status===429 ? "quota" : (r.status===401 || r.status===403 || /api key/i.test(m)) ? "key" : "api", message:m}; }
+    // The service is sometimes overloaded for a few seconds: retry, then try the next model, before giving up.
+    let r = null, lastErr = null;
+    const wait = ms => new Promise((res,rej) => { const t = setTimeout(res, ms); ctl.signal.addEventListener("abort", () => { clearTimeout(t); rej({name:"AbortError"}); }, {once:true}); });
+    outer: for (const m of models) for (let attempt=0; attempt<2; attempt++) {
+      r = await call(m);
+      if (r.ok) break outer;
+      let msg = ""; try { msg = ((await r.clone().json()).error||{}).message||""; } catch(e) {}
+      const busy = r.status===503 || r.status===500 || /overloaded|high demand|unavailable/i.test(msg);
+      lastErr = {code: busy ? "busy" : r.status===429 ? "quota" : (r.status===401 || r.status===403 || /api key/i.test(msg)) ? "key" : "api", message:msg};
+      if (lastErr.code==="key") throw lastErr;
+      if (r.status===404) { try { localStorage.removeItem("pmbh-ocrmodel"); } catch(e) {} break; }
+      if (!busy && lastErr.code!=="quota") throw lastErr;
+      if (cur && cur.key===forKey) setAi({busy:true,msg:"Online OCR is busy. Trying again…",stop:true});
+      if (attempt===0) await wait(1800); else break;
+    }
+    if (!r || !r.ok) throw lastErr || {code:"api"};
     const j = await r.json();
     const txt = (((j.candidates||[])[0]||{}).content||{}).parts ? j.candidates[0].content.parts.map(p=>p.text||"").join("") : "";
     let out = null; try { out = JSON.parse(txt); } catch(e) { const m = /\{[\s\S]*\}/.exec(txt); if (m) { try { out = JSON.parse(m[0]); } catch(x) {} } }
@@ -1038,6 +1053,11 @@ async function readOnline(){
     if (!cur || cur.key!==forKey) return;
     const code = e && e.code;
     if (e && e.name==="AbortError") return setAi({msg:"Stopped. Type the details or read again.",retry:true});
+    if (code==="busy" || code==="quota" || !code) {   // do not leave the user stuck: read it on the phone instead
+      if (aiCtl===ctl) aiCtl = null;
+      toast(code==="quota" ? "Online OCR has reached its limit for now. Reading on this phone instead." : "Online OCR is busy right now. Reading on this phone instead.");
+      return readDevice();
+    }
     setAi({bad:true,retry:true,msg: code==="key" ? "The Online OCR key was not accepted. Check it in Setup." : code==="quota" ? "Online OCR has reached its free limit for now. Wait a minute, or use the on-phone reader."
       : code==="api" ? "Online OCR could not process the photo"+(e.message?": "+String(e.message).slice(0,140):".")+" Use the on-phone reader or type the details."
       : "Online OCR could not be reached. Use the on-phone reader, or try again when the signal is better."});
@@ -1215,7 +1235,7 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
-const APP_VERSION = "17 Nov 2026, build 7";
+const APP_VERSION = "17 Nov 2026, build 8";
 let installEvt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
