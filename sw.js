@@ -2,7 +2,7 @@
 // and fall back to the copy on the phone when there is none. The big reader files are kept on the phone and not re-downloaded.
 const V = "pmbh-capture-v1";
 const SHELL = ["./","index.html","manifest.webmanifest","icon-192.png","icon-512.png"];
-const BIG = ["lib/xlsx.full.min.js","lib/jszip.min.js","ocr/tesseract.min.js","ocr/worker.min.js","ocr/tesseract-core-simd-lstm.wasm.js","ocr/tesseract-core-lstm.wasm.js","ocr/eng-lang.json",
+const BIG = ["lib/xlsx.full.min.js","lib/jszip.min.js","lib/zxing.min.js","ocr/tesseract.min.js","ocr/worker.min.js","ocr/tesseract-core-simd-lstm.wasm.js","ocr/tesseract-core-lstm.wasm.js","ocr/eng-lang.json",
   "fonts/barlow-latin-400-normal.woff2","fonts/barlow-latin-500-normal.woff2","fonts/barlow-latin-600-normal.woff2","fonts/barlow-condensed-latin-600-normal.woff2","fonts/barlow-condensed-latin-700-normal.woff2"];
 self.addEventListener("install", e => e.waitUntil(caches.open(V).then(async c => {
   await c.addAll(SHELL.map(u => new Request(u, {cache:"reload"})));
