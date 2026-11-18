@@ -302,7 +302,7 @@ section.grp .fields{padding:0 16px 16px}
   <main class="wrap editpad">
     <section class="panel" id="step-photo">
       <div class="reader" id="tplpick" style="margin:0 0 14px"></div>
-      <h2>Photograph the nameplate</h2>
+      <h2>Take photos of the asset</h2>
       <div class="photos" id="photos"></div>
       <div class="note" style="margin:4px 0 12px">Take as many as you like: the nameplate, the asset tag, labels, the bar code, the whole asset. The app reads every photo and works out the make, model, serial number, asset ID, label, bar code and manufacture date.</div>
       <div class="row2">
@@ -337,7 +337,7 @@ section.grp .fields{padding:0 16px 16px}
 // AFM field name -> short key used in saved assets (anything not listed keeps its AFM field name)
 const KEYS = {triIdTX:"id",triNameTX:"name",triSerialNumTX:"serial",triBarCodeEntryTX:"barcode",triPrimaryOrganizationTX:"org",cstOperatorTX:"operator",triPrimaryLocationTX:"location",cstEquipmentPositionTX:"position",cstFixedORMobileLI:"fixed",triSpecNameTX:"spec",triBuildingSystemCL:"cls",cstAssetOwnershipStatusCL:"ownStatus",cstAssetOwnershipTypeCL:"ownType",triActiveStartDA:"inService",cstManufactureDateDA:"mfgDate",cstWarrantyStartDateDA:"warrStart",cstWarrantyExpiresDA:"warrEnd",triPONumTX:"po",triPurchaseCostNU:"cost",cstSupplierTX:"supplier",triLifeExpectancyDU:"life",cstAssetCriticalityLI:"criticality",cstOperatingEnvironmentLI:"env",cstAssetUtilisationLI:"util",triConditionLI:"condition",cstConditionDA:"assessDate",cstConditionAssessmentCommentsTX:"comments",triCurrentReplacementValueNU:"replValue",cstMaintenanceTypeLI:"maintType",triMaintenancePriorityCL:"maintPriority",cstMaintenanceStrategyLI:"maintStrategy",cstServiceAgentTX:"agent",cstDCParentRecordIdTX:"parent"};
 const SKIP = new Set(["cstDCRecordIdTX"]);
-const HINT = {id:"The number on the hospital asset tag",parent:"The asset ID of the asset this one belongs to or is fed from. Leave blank if there is none.",life:"Type it any way, e.g. 10 years, 15 yrs, 6 months, one year",position:"e.g. plant room north wall, roof above theatre 2",name:"Built as asset type - service area - asset label - capacity, following the HI naming guide. The brand is not part of the name."};
+const HINT = {id:"The number on the hospital asset tag",parent:"The asset ID of the asset this one belongs to or is fed from. Leave blank if there is none.",life:"Type it any way, e.g. 10 years, 15 yrs, 6 months, one year",position:"e.g. plant room north wall, roof above theatre 2",name:"Built from the asset type, service area, asset label and capacity. The brand is not part of the name."};
 const SCALE = {criticality:[1,3,4,5],env:[1,3,5],util:[0,0,0],condition:[1,2,3,4,5]};
 const LABELS = {id:"Asset ID (asset tag)",parent:"Parent asset ID",warrStart:"Warranty start date",warrEnd:"Warranty expiry date",life:"Life expectancy",cstDCAssessedByTX:"Assessed by",fixed:"Fixed or mobile?",barcode:"Bar code",spec:"Specification name",operator:"Operator (cost code)",serial:"Serial number",location:"Primary location"};
 const CAPTURE = {   // captured for every category; kept in the capture log sheet, not in the data load columns
@@ -348,7 +348,6 @@ const CAPTURE = {   // captured for every category; kept in the capture log shee
   make:{label:"Make (manufacturer)",type:"text"},
   modelName:{label:"Model name",type:"text",hint:"The product name, if the plate gives one"},
   model:{label:"Model number",type:"text"},
-  bodyProt:{label:"Body or cardiac protected circuit?",type:"select",opts:["Yes","No"],mnc:true},
 };
 let PACK = null, F = {}, STEPS = [], TPL = null;
 const defCache = {};
@@ -367,14 +366,16 @@ function defsFor(id){
     else if (f.type==="Duration") d.type = "duration";
     else if (f.type==="Number") d.type = "number";
     else d.type = (size>=1000 && !f.locator) ? "textarea" : "text";
-    if (["position","parent","warrStart","warrEnd"].includes(key)) d.mnc = true;   // the MNCLHD supplement makes these mandatory where relevant
+    if (["position","parent","warrStart","warrEnd"].includes(key)) d.mnc = true;
     Fm[key] = d; order.push(key);
   }
   const used = new Set(), take = ks => { const r = [...new Set(ks)].filter(k => Fm[k] && !used.has(k)); r.forEach(k=>used.add(k)); return r; };
   const plate = take(["make","modelName","model","serial","mfgDate"]);
   const spec = take(["spec","cls"].concat(order.filter(k=>Fm[k].group==="Spec Information")));
-  const asset = take(["id","barcode","parent","atype","area","label","cap","name","location","position","fixed","bodyProt"]);
+  const asset = take(["id","barcode","parent","atype","area","label","cap","name","location","position","fixed"]);
+  used.add("life");   // life expectancy goes with the dates
   const cond = take(["condition","criticality","env","util","assessDate","comments"].concat(order.filter(k=>Fm[k].tab==="Assessment")));
+  used.delete("life");
   const maint = take(["maintType","maintPriority","maintStrategy","agent"].concat(order.filter(k=>Fm[k].group==="Maintenance Details")));
   const own = take(["org","operator","ownStatus","ownType","triCurrencyUO","cstICTPurposeTX"].concat(order.filter(k=>["Details","Units"].includes(Fm[k].group))));
   const buy = take(["po","triPODA","cost","supplier","cstICTInvoiceNumberTX"].concat(order.filter(k=>Fm[k].group==="Purchase Details")));
@@ -461,10 +462,11 @@ const ICON = {
   "Vehicles":SVG('<path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7z"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17.5" cy="17.5" r="1.8"/>'),
 };
 function srcInfo(src, f){
-  if (src==="types") return {title:"Asset type",strip:"",ph:"Search asset type, e.g. scales, chiller, pump",free:"Not in the Asset Data Standard's asset type list."};
+  if (src==="types") return {title:"Asset type",strip:"",ph:"Search asset type, e.g. scales, chiller, pump",free:"Not in the asset type list."};
   if (src.startsWith("Location")) return {title:"Primary location",strip:"\\Locations\\",ph:"Search building, level or room"};
   if (src==="Organization:triPathTX") return {title:"Organization",strip:"\\Organizations\\",ph:"Search department"};
   if (src.startsWith("triCostCode")) return {title:"Operator (cost code)",strip:"",ph:"Search cost code"};
+  if (src==="Organization:triNameTX") return {title:f ? f.label : "Supplier",strip:"",ph:"Search, or type the name",free:"Not in the supplier list. Check the spelling."};
   if (/Spec:/.test(src)) return {title:"Specification",strip:"",ph:"Search make, model or type"};
   return {title:f ? f.label : "Choose",strip:"",ph:"Search"};
 }
@@ -570,7 +572,7 @@ const timeout = (p, ms) => Promise.race([p, new Promise((_,rej)=>setTimeout(()=>
 const lists = {};
 /* The lists are built into the app in encrypted form (data.bin). An access code, normally delivered inside an
    invitation link, unlocks them once; after that they are kept on the phone. Nothing in the app can change them. */
-const PACK_VERSION = "2026-11-18b";
+const PACK_VERSION = "2026-11-18c";
 const cleanCode = c => String(c||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
 const savedCode = () => { try { return localStorage.getItem("pmbh-code")||""; } catch(e) { return ""; } };
 async function fetchPack(code){
@@ -725,7 +727,7 @@ function renderList(){
   if (!records.length) {
     const art = el("div",{class:"art"}); art.insertAdjacentHTML("beforeend", UI.cam);
     list.append(el("div",{class:"empty"}, art, el("h2",{text:"Capture your first asset"}), el("p",{text:"Three steps, about a minute each."}),
-      el("ol",{}, el("li",{text:"Tap Add asset and photograph the nameplate."}),
+      el("ol",{}, el("li",{text:"Tap Add asset and take photos of the asset: the nameplate, the asset tag and any labels."}),
         el("li",{text:"Check the make, model and serial that were read, then tap the asset type and room."}),
         el("li",{text:"Tap Export to save the Excel, with or without photos, on this phone. Copy it to your PC and paste the rows into the AFMO upload sheet."}))));
   }
@@ -856,7 +858,7 @@ function fieldNode(k){
       const rest = String(cur.id||"").toUpperCase().replace(new RegExp("^("+ASSET_PREFIXES.join("|")+")[\\s.\\-_/]*"),"");
       cur.id = x+rest; dirty = true; aiFilled.delete("id"); renderForm(); const i = $("f-id"); if (i) { i.focus(); i.setSelectionRange(i.value.length,i.value.length); } }}));
     node.append(q);
-    if (v && !pre) node.append(el("div",{class:"fnote bad",text:"MNCLHD asset IDs start with "+ASSET_PREFIXES.join(", ")+". Check this one."}));
+    if (v && !pre) node.append(el("div",{class:"fnote bad",text:"Asset IDs start with "+ASSET_PREFIXES.join(", ")+". Check this one."}));
   }
   if (k==="parent") {
     const ids = [...new Set(records.filter(r=>r.key!==cur.key && r.id).slice(-6).reverse().map(r=>r.id))];
@@ -868,6 +870,7 @@ function fieldNode(k){
 function fillSugg(box){
   box.replaceChildren();
   const have = String(cur.spec||"");
+  if (have && !/^[A-Za-z]{2,4}-[A-Za-z0-9]/.test(have.trim())) box.append(el("div",{class:"note",text:"Note: this specification is not in the VBIS format (for example \u201cME-FCU-\u2026\u201d). That is fine, but if a VBIS-coded one exists for this model, it is preferred."}));
   if (have) loadList(specSrc()).then(L => { if (!L.failed && cur.spec===have && !L.raw.includes(have) && !box.querySelector(".chip")) box.prepend(el("span",{class:"chip warn",text:"Not in the template's specification list"})); });
   const opts = specSugg.filter(s=>s!==have);
   if (!opts.length && !have && (cur.make || cur.model)) box.append(el("div",{class:"note",text:"No specification in AFM matches this make and model number. Search the list, or ask for a new specification to be created."}));
@@ -1023,36 +1026,53 @@ async function detectBarcode(blobs){
   return "";
 }
 function openScanner(k){
-  let stream = null, alive = true, timer = 0;
+  const text = k==="id";   // the asset tag carries a printed alphanumeric code; bar codes are read with the bar code reader
+  let stream = null, alive = true, timer = 0, busy = false, lastId = "";
   const stop = () => { alive = false; clearTimeout(timer); if (stream) stream.getTracks().forEach(t => t.stop()); };
-  openSheet(k==="id" ? "Scan the asset tag" : "Scan the bar code", async (body, close) => {
+  openSheet(text ? "Read the asset tag" : "Scan the bar code", async (body, close) => {
     const video = el("video",{playsinline:true,muted:true,autoplay:true}), msg = el("div",{class:"note",role:"status",text:"Starting the camera…"});
-    const torch = el("button",{type:"button",class:"btn",hidden:true,text:"Torch"});
-    body.append(el("div",{class:"scan"}, video, el("div",{class:"aim"})), msg,
+    const torch = el("button",{type:"button",class:"btn",hidden:true,text:"Torch"}), found = el("div",{});
+    body.append(el("div",{class:"scan"}, video, el("div",{class:"aim"})), msg, found,
       el("div",{class:"row2"}, torch, el("button",{type:"button",class:"btn",text:"Take a photo instead",onclick:()=>{ close(); $("in-cam").click(); }})));
     try { stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1920},height:{ideal:1080}},audio:false}); }
-    catch(e) { msg.textContent = "The camera could not be opened. Allow camera access for this app, or take a photo of the bar code instead."; return; }
+    catch(e) { msg.textContent = "The camera could not be opened. Allow camera access for this app, or take a photo instead."; return; }
     if (!alive) return stop();
     video.srcObject = stream; try { await video.play(); } catch(e) {}
     const track = stream.getVideoTracks()[0], caps = track.getCapabilities ? track.getCapabilities() : {};
     if (caps.torch) { let on = false; torch.hidden = false; torch.onclick = async () => { on = !on; try { await track.applyConstraints({advanced:[{torch:on}]}); torch.textContent = on ? "Torch off" : "Torch"; } catch(e) {} }; }
-    msg.textContent = "Hold the bar code inside the box. It is read automatically.";
+    msg.textContent = text ? "Hold the asset tag so its code is inside the box. The code is read automatically." : "Hold the bar code inside the box. It is read automatically.";
+    const done = (v, how) => {
+      try { navigator.vibrate && navigator.vibrate(40); } catch(e) {}
+      stop(); close();
+      if (text) { cur.id = v; aiFilled.delete("id"); }
+      else { cur.barcode = v; aiFilled.delete("barcode"); const asId = findAssetId(v); if (asId && !cur.id) { cur.id = asId; aiFilled.add("id"); aiWhy.id = "from the bar code"; } }
+      dirty = true; renderPhotos(); renderForm(); toast((how||"Read")+": "+v);
+    };
     const c = document.createElement("canvas");
+    const frame = (crop) => { const vw = video.videoWidth, vh = video.videoHeight;
+      const [x,y,w,h] = crop ? [vw*.08, vh*.3, vw*.84, vh*.4] : [0,0,vw,vh]; const k2 = Math.min(1, (crop ? 700 : 1400)/w);
+      c.width = Math.round(w*k2); c.height = Math.round(h*k2); c.getContext("2d",{willReadFrequently:true}).drawImage(video,x,y,w,h,0,0,c.width,c.height); return c; };
     const tick = async () => {
       if (!alive) return;
-      if (video.videoWidth) {
-        const k2 = Math.min(1, 1280/video.videoWidth); c.width = Math.round(video.videoWidth*k2); c.height = Math.round(video.videoHeight*k2);
-        c.getContext("2d",{willReadFrequently:true}).drawImage(video,0,0,c.width,c.height);
-        const v = (await decodeCanvas(c)).trim();
-        if (v && alive) {
-          try { navigator.vibrate && navigator.vibrate(40); } catch(e) {}
-          stop(); close();
-          const asId = findAssetId(v);
-          if (k==="id") { cur.id = asId || v; aiFilled.delete("id"); } else { cur.barcode = v; aiFilled.delete("barcode"); if (asId && !cur.id) { cur.id = asId; aiFilled.add("id"); aiWhy.id = "from the bar code"; } }
-          dirty = true; renderPhotos(); renderForm(); toast("Scanned: "+v); return;
-        }
+      if (video.videoWidth && !busy) {
+        busy = true;
+        try {
+          const code = (await decodeCanvas(frame(false))).trim();   // a bar code on the tag is the quickest read
+          if (code && alive) { const asId = findAssetId(code); if (!text) return done(code, "Scanned"); if (asId) return done(asId, "Scanned"); }
+          if (text && alive) {
+            const w = await getOcr(); const fc = frame(true), blob = await new Promise(r => fc.toBlob(r,"image/jpeg",.92));
+            await w.setParameters({tessedit_pageseg_mode:"6"});   // one block of text, as on a tag
+            let t = ""; try { t = (await w.recognize(await prep(blob,false,700))).data.text || ""; } finally { await w.setParameters({tessedit_pageseg_mode:"11"}); }
+            if (!alive) return;
+            const id = findAssetId(t);
+            if (id && id===lastId) return done(id);   // the same code twice in a row: a steady, complete read
+            lastId = id || lastId;
+            const cand = id || (t.toUpperCase().match(/\b[A-Z0-9][A-Z0-9.\-\/]{3,}\b/g)||[]).filter(x => /\d/.test(x) && /[A-Z]/.test(x)).sort((a,b)=>b.length-a.length)[0] || "";
+            found.replaceChildren(...(cand ? [el("button",{type:"button",class:"btn primary block",text:"Use \u201c"+cand+"\u201d",onclick:()=>done(cand)})] : []));
+          }
+        } catch(e) {} finally { busy = false; }
       }
-      timer = setTimeout(tick, 180);
+      timer = setTimeout(tick, text ? 700 : 180);
     };
     tick();
   }, stop);
@@ -1115,7 +1135,7 @@ function parseDate(t){
   return "";
 }
 const STOP = /^(MANUFACTURER|MANUFACTURED|MANUF|MFR|BY|COUNTRY|ORIGIN|REFRIGERANT|DANGER|INDOOR|OUTDOOR|UNIT|ROOM|AIR|CONDITIONER|HEAT|PUMP|COOLING|HEATING|CURRENT|FREQUENCY|NET|GROSS|PRESSURE|DESIGN|SOUND|LEVEL|OUTSIDE|ELECTRIC|ELECTRICAL|CORPORATION|CORP|INC|GMBH|COMPANY|LIMITED|THAILAND|KOREA|ITALY|USA|DATE|NAME|PRODUCT|ROTATION|QUANTITY|CHARGE|RATING|RATINGS|NO|NUM|NUMBER|NAME|DATE|OF|THE|AND|FOR|VOLTS?|VOLTAGE|HZ|KW|PHASE|MODEL|MOD|SERIAL|SER|TYPE|MADE|IN|CODE|MFG|POWER|INPUT|OUTPUT|RATED|MAX|MIN|WARNING|CAUTION|AUSTRALIA|CHINA|GERMANY|JAPAN|PTY|LTD|CLASS|WEIGHT|CAPACITY)$/i;
-const RE_SERIAL = /(?:^|[^A-Z])(?:SERIAL|SER|S\/N|S\.N|SN|S\/NO)(?![A-Z])\.?\s*(?:NUMBER|NUM|NO|N0|#)?\.?\s*[:#.\-]*\s*/;
+const RE_SERIAL = /(?:^|[^A-Z])(?:SERIA[L1I]|SER|[S5$]\s?\/\s?N[O0]?|S\.N|SN|MFG\.?\s?N[O0]|FAB(?:R)?\.?\s?N[O0R]?)(?![A-Z])\.?\s*(?:NUMBER|NUM|NO|N0|#)?\.?\s*[:#.\-]*\s*/;
 const RE_MODEL = /(?:^|[^A-Z])(?:MODEL|MOD|M\/N|CAT|PART|ART)(?![A-Z])(?!\.?\s*NAME)\.?\s*(?:NUMBER|NUM|NO|N0|#)?\.?\s*[:#.\-]*\s*/;
 const RE_MODELNAME = /(?:^|[^A-Z])(?:MODEL|PRODUCT|TRADE)\s*NAME\s*[:#.\-]*\s*/;
 const RE_TYPE = /(?:^|[^A-Z])(?:TYPE|TYP|REF|CAT)(?![A-Z])\.?\s*(?:NUMBER|NUM|NO|N0|#)?\.?\s*[:#.\-]*\s*/;
@@ -1143,9 +1163,17 @@ function parsePlate(words, dict){
         if (raw) return lines[i+1].text;
         v = pick(below.map(w=>w.t), needDigit);
       }
+      if (!v && !raw) {   // tilted photo: the nearest word to the right of the label, at about the same height
+        const lab = lines[i].w.find(w => re.test(" "+w.t.toUpperCase()+" ")) || lines[i].w[lines[i].w.length-1], h = lab.y1-lab.y0, cy = (lab.y0+lab.y1)/2;
+        const right = words.filter(w => w.x0 > lab.x1-2 && Math.abs((w.y0+w.y1)/2-cy) < h*1.3).sort((a,b)=>a.x0-b.x0);
+        v = pick(right.map(w=>w.t), needDigit);
+      }
       if (v) return v; }
     return ""; };
   out.serial = valueAfter(RE_SERIAL, true);
+  // serials are usually digits followed by one or two letters (4004218T, 1012345AB); OCR often splits the letters off
+  if (out.serial && /^\d+$/.test(out.serial)) { const m = new RegExp("\\b"+out.serial+"\\s?([A-Z]{1,2})\\b").exec(text.toUpperCase()); if (m && !/^(V|A|HZ|KW|W|KG|L|PH|NO)$/.test(m[1])) out.serial += m[1]; }
+  if (!out.serial) { const m = /(?:^|\s)(\d{5,10}[A-Z]{1,2})(?=\s|$)/m.exec(text.toUpperCase()); if (m && !/(KW|KG|HZ|PA|MM|CM|LT)$/.test(m[1])) { out.serial = m[1]; out.unclear.push("serial"); } }
   // make: a known AFM manufacturer printed on the plate, the larger the lettering the better
   let best = null;
   for (const l of lines) for (let i=0;i<l.w.length;i++) for (const span of [1,2]) {
@@ -1159,7 +1187,8 @@ function parsePlate(words, dict){
   else if (RE_SERIAL.test(text.toUpperCase()) || RE_MODEL.test(text.toUpperCase())) { const big = words.filter(w => /^[A-Za-z][A-Za-z&\-]{2,}$/.test(clean(w.t)) && !STOP.test(clean(w.t))).sort((a,b)=>(b.y1-b.y0)-(a.y1-a.y0))[0];
     if (big) { out.make = clean(big.t); out.unclear.push("make"); } }
   // model: prefer a model AFM already holds for that make, then a labelled value
-  const labelled = valueAfter(RE_MODEL, true) || valueAfter(RE_TYPE, true);
+  let labelled = valueAfter(RE_MODEL, true) || valueAfter(RE_TYPE, true);
+  if (labelled) { const m = new RegExp("(?:MODEL|MOD|M\\/N|TYPE)[^A-Z0-9]*(?:NO\\.?|NUMBER)?[^A-Z0-9]*([A-Z]{2,4})\\s+"+labelled.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b").exec(text.toUpperCase()); if (m && !STOP.test(m[1])) labelled = m[1]+" "+labelled; }
   const mn = valueAfter(RE_MODELNAME, false, true); if (mn) out.model_name = mn.replace(/\s+/g," ").trim().slice(0,60);
   if (best) {
     let hit = "";
@@ -1204,8 +1233,15 @@ async function readDevice(){
         ocrProgress = pr => { if (cur && cur.key===forKey) setAi({busy:true,msg:"Reading on this phone… photo "+n+" of "+todo.length+", "+Math.round(pr*100)+"%"}); };
         let res = parsePlate(wordsOf((await w.recognize(await prep(blob,false), {}, {text:true,blocks:true})).data), dict);
         // weak read: try light-on-dark, then a smaller copy (very large lettering, as on a close-up label, reads badly at full size)
-        for (const [inv, side] of [[true,2400],[false,1400],[false,900],[false,700],[true,900]]) { if (res.strong>=3) break;
-          const r2 = parsePlate(wordsOf((await w.recognize(await prep(blob,inv,side), {}, {text:true,blocks:true})).data), dict); if (r2.strong>res.strong) res = r2; }
+        // keep trying while the serial or model is missing: tables with drawn boxes and very large lettering often need another pass
+        const score = r => r.strong + (r.serial?20:0) + (r.model?10:0) + (r.make?3:0);
+        for (const [inv, side, psm] of [[false,1600,"6"],[true,2400,"11"],[false,1400,"11"],[false,900,"11"],[false,1100,"6"],[false,700,"11"],[true,900,"11"]]) {
+          if (res.strong>=3 && res.serial && res.model) break;
+          if (psm!=="11") await w.setParameters({tessedit_pageseg_mode:psm});
+          let r2; try { r2 = parsePlate(wordsOf((await w.recognize(await prep(blob,inv,side), {}, {text:true,blocks:true})).data), dict); } finally { if (psm!=="11") await w.setParameters({tessedit_pageseg_mode:"11"}); }
+          if (score(r2)>score(res)) { for (const k of ["make","model","model_name","serial","manufacture_date"]) if (!r2[k] && res[k]) r2[k] = res[k]; res = r2; }
+          else for (const k of ["make","model","model_name","serial","manufacture_date","asset_id","asset_label","capacity","asset_type"]) if (!res[k] && r2[k]) res[k] = r2[k];
+        }
         ocrCache.set(key, res);
         if (!cur || cur.key!==forKey) return;
       }
@@ -1281,6 +1317,8 @@ How these plates are laid out:
 - GS1 or UDI text under a barcode: (01) is the product code, (11) the production date as YYMMDD, (21) the serial number, (10) the lot.
 - Fire extinguishers have no model number: use "2.5kg - Powder ABE", "4.5kg - Powder ABE", "9.0kg - Powder ABE", "3.5kg - Co2", "5.0kg - Co2", "9L - Water", "9L - Foam" or "7L - Wet Chemical". For a fire door use its rating as the model, for example "FRL -/120/30".
 - A hospital asset tag is a small sticker or engraved tag. At this health district asset IDs begin with one of the hospital codes PMBH, HMN, COF, CCN, KEM, CN, CO, PM or DO, followed by numbers. Its number goes in "asset_id" (with its prefix) or "barcode", never in "serial". An electrical test-and-tag label is neither.
+- The serial number is usually labelled Serial Number, Serial No, Ser No, Ser#, SN, S/N or MFG No. Find that label on every photo and read the value printed beside or under it, character by character.
+- Serial numbers on this equipment are usually a run of digits followed by one or two letters (for example 4004218T or 1012345AB). Keep the trailing letters: they are part of the serial number.
 - Model name and model number are different things. The model number is the alphanumeric code (MUZ-AP35VG, 813, FBQ100EVE). The model name is a product or series name if one is printed (Avanti, Stellar, Classic). Words such as Manufacturer, Model, Serial, Type or Made in are labels, never values.
 - A local label fixed to the asset such as CH-1, FCU 2, DB20 or Pump 1 is the "asset_label".
 
@@ -1377,7 +1415,7 @@ async function readOnline(){
     if (!blobs.length) throw {code:"photo"};
     const T = await loadList("types");
     const prompt = promptFor(blobs.length, T.raw, "");
-    const imgs = []; for (const b of blobs) imgs.push(await toB64(await shrinkFor(b, 650000, 1800)));
+    const imgs = []; for (const b of blobs) imgs.push(await toB64(await shrinkFor(b, 1200000, 2400)));
     const onBusy = () => { if (cur && cur.key===forKey) setAi({busy:true,msg:"Online OCR is busy. Trying again…",stop:true}); };
     const out = keyService(onlineKey())==="claude" ? await callClaude(prompt, imgs, ctl, onBusy) : await callGoogle(prompt, imgs, ctl, onBusy);
     if (!cur || cur.key!==forKey) return;
@@ -1436,7 +1474,7 @@ function openPicker(k){
         const counts = {}; for (const o of L.meta) counts[o.g] = (counts[o.g]||0)+1;
         const tiles = el("div",{class:"tiles"});
         for (const g of Object.keys(ICON).filter(g=>counts[g])) { const b = el("button",{type:"button",class:"tile",onclick:()=>{ group = g; draw(); }}); b.insertAdjacentHTML("beforeend", ICON[g]); b.append(g, el("small",{text:counts[g]+" types"})); tiles.append(b); }
-        res.append(el("div",{class:"note",text:"Pick a discipline, or type above to search all "+L.raw.length+" asset types in the Asset Data Standard.",style:"padding:4px 0 8px"}), tiles);
+        res.append(el("div",{class:"note",text:"Pick a discipline, or type above to search all "+L.raw.length+" asset types.",style:"padding:4px 0 8px"}), tiles);
         items = [];
       } else if (!q && L.meta) {
         res.append(el("button",{type:"button",class:"free",text:"‹ All disciplines",onclick:()=>{ group = ""; draw(); }}));
@@ -1517,9 +1555,9 @@ function buildWorkbook(tpl, withPhotos){
   })));
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = tpl.headers.map(h => ({wch:Math.max(14,h.length+2)}));
-  const log = [["Row","Asset ID","Name","Asset type","Service area","Asset label","Capacity / energy / utility","Make","Model name","Model number","Serial number","Body or cardiac protected","Photo files","Captured","Still missing"]];
-  mine.forEach(([r,i],n) => log.push([String(n+1), r.id||"", r.name||"", r.atype||"", r.area||"", r.label||"", r.cap||"", r.make||"", r.modelName||"", r.model||"", r.serial||"", r.bodyProt||"", withPhotos ? photoNames(r,i).map(x=>"Photos/"+x).join("; ") : (r.photos||[]).length+" photo(s) in the app", (r.createdAt||"").slice(0,16).replace("T"," "), missing(r).map(k=>Ft[k].label).join(", ")]));
-  const ws2 = XLSX.utils.aoa_to_sheet(log); ws2["!cols"] = [8,14,34,24,16,14,20,18,18,22,22,14,44,18,22].map(w=>({wch:w}));
+  const log = [["Row","Asset ID","Name","Asset type","Service area","Asset label","Capacity / energy / utility","Make","Model name","Model number","Serial number","Photo files","Captured","Still missing"]];
+  mine.forEach(([r,i],n) => log.push([String(n+1), r.id||"", r.name||"", r.atype||"", r.area||"", r.label||"", r.cap||"", r.make||"", r.modelName||"", r.model||"", r.serial||"", withPhotos ? photoNames(r,i).map(x=>"Photos/"+x).join("; ") : (r.photos||[]).length+" photo(s) in the app", (r.createdAt||"").slice(0,16).replace("T"," "), missing(r).map(k=>Ft[k].label).join(", ")]));
+  const ws2 = XLSX.utils.aoa_to_sheet(log); ws2["!cols"] = [8,14,34,24,16,14,20,18,18,22,22,44,18,22].map(w=>({wch:w}));
   const wb = XLSX.utils.book_new();
   const readme = XLSX.utils.aoa_to_sheet([
     ["THIS IS NOT THE FINAL UPLOAD FILE"],[""],
@@ -1588,7 +1626,7 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
-const APP_VERSION = "18 Nov 2026, build 18";
+const APP_VERSION = "18 Nov 2026, build 21";
 let installEvt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
