@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Asset Capture</title>
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
 <meta name="theme-color" content="#17303d">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -1733,7 +1734,7 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
-const APP_VERSION = "18 Nov 2026, build 26";
+const APP_VERSION = "18 Nov 2026, build 27";
 let installEvt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
