@@ -1291,63 +1291,97 @@ Reply with only one JSON object with these keys. Use "" for anything not printed
 "photo_issue": "" when the plate is readable; otherwise one short sentence telling the photographer what to fix, such as glare over the serial number, too far away, blurred, plate cut off
 
 Asset type list: ${types.join("; ")}`;
+// Online OCR works with the key each person enters: a Claude (Anthropic) API key or a Google AI Studio key. The key decides the service.
+const keyService = k => /^sk-ant-/i.test(k) ? "claude" : "google";
+const OCR_KEYS = ["make","model_name","model_number","serial","manufacture_date","asset_type","asset_label","capacity","barcode","asset_id","details"];
+const OCR_SCHEMA = {type:"object",additionalProperties:false,required:OCR_KEYS.concat(["unclear","photo_issue"]),
+  properties:Object.assign(Object.fromEntries(OCR_KEYS.map(k=>[k,{type:"string"}])),{unclear:{type:"array",items:{type:"string"}},photo_issue:{type:"string"}})};
+const parseJsonReply = txt => { let o = null; try { o = JSON.parse(txt); } catch(e) { const m = /\{[\s\S]*\}/.exec(txt||""); if (m) { try { o = JSON.parse(m[0]); } catch(x) {} } } if (Array.isArray(o)) o = o[0]; return (o && typeof o==="object") ? o : null; };
+const waitFor = (ms, signal) => new Promise((res,rej) => { const t = setTimeout(res, ms); signal.addEventListener("abort", () => { clearTimeout(t); rej({name:"AbortError"}); }, {once:true}); });
+async function callClaude(prompt, imgs, ctl, onBusy){
+  const body = JSON.stringify({model:"claude-opus-5-5", max_tokens:16000,
+    output_config:{effort:"medium", format:{type:"json_schema", schema:OCR_SCHEMA}},
+    fallbacks:"default",   // if the request is declined, the API retries it on a suitable model by itself
+    messages:[{role:"user", content:imgs.map(d => ({type:"image",source:{type:"base64",media_type:"image/jpeg",data:d}})).concat([{type:"text",text:prompt}])}]});
+  let r = null, err = null;
+  for (let attempt=0; attempt<3; attempt++) {
+    r = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",signal:ctl.signal,body,headers:{"content-type":"application/json","x-api-key":onlineKey(),
+      "anthropic-version":"2026-10-21","anthropic-beta":"server-side-fallback-2026-07-01","anthropic-dangerous-direct-browser-access":"true"}});
+    if (r.ok) break;
+    let t = "", msg = ""; try { const e = (await r.clone().json()).error||{}; t = e.type||""; msg = e.message||""; } catch(e) {}
+    err = {code: r.status===401 || r.status===403 || t==="authentication_error" || t==="permission_error" ? "key" : r.status===429 ? "quota" : (r.status===529 || r.status>=500 || t==="overloaded_error") ? "busy" : r.status===402 ? "billing" : "api", message:msg};
+    if (err.code!=="busy" && err.code!=="quota") throw err;
+    if (attempt===2) break;
+    const ra = parseFloat(r.headers.get("retry-after")||""); if (err.code==="quota" && !(ra<=10)) break;
+    onBusy(); await waitFor(isFinite(ra) && ra>0 ? Math.min(ra,10)*1000 : 2000*(attempt+1), ctl.signal);
+  }
+  if (!r || !r.ok) throw err || {code:"api"};
+  const j = await r.json();
+  if (j.stop_reason==="refusal") throw {code:"api", message:"The photos were declined"};
+  const out = parseJsonReply((j.content||[]).filter(b => b.type==="text").map(b => b.text).join(""));
+  if (!out) throw {code:"api", message:"The reply could not be understood"};
+  return out;
+}
+async function callGoogle(prompt, imgs, ctl, onBusy){
+  const models = await pickModel(ctl.signal);
+  const parts = [{text:prompt}].concat(imgs.map(d => ({inline_data:{mime_type:"image/jpeg", data:d}})));
+  const call = m => fetch(GAPI+"models/"+m+":generateContent",{method:"POST",signal:ctl.signal,headers:{"Content-Type":"application/json","x-goog-api-key":onlineKey()},
+    body:JSON.stringify({contents:[{role:"user",parts}],generationConfig:{temperature:0,responseMimeType:"application/json"}})});
+  // The service is sometimes overloaded for a few seconds: retry, then try the next model, before giving up.
+  let r = null, lastErr = null;
+  outer: for (const m of models) for (let attempt=0; attempt<2; attempt++) {
+    r = await call(m);
+    if (r.ok) break outer;
+    let msg = ""; try { msg = ((await r.clone().json()).error||{}).message||""; } catch(e) {}
+    const busy = r.status===503 || r.status===500 || /overloaded|high demand|unavailable/i.test(msg);
+    lastErr = {code: busy ? "busy" : r.status===429 ? "quota" : (r.status===401 || r.status===403 || /api key/i.test(msg)) ? "key" : "api", message:msg};
+    if (lastErr.code==="key") throw lastErr;
+    if (r.status===404) { try { localStorage.removeItem("pmbh-ocrmodel"); } catch(e) {} break; }
+    if (!busy && lastErr.code!=="quota") throw lastErr;
+    onBusy();
+    if (attempt===0) await waitFor(1800, ctl.signal); else break;
+  }
+  if (!r || !r.ok) throw lastErr || {code:"api"};
+  const j = await r.json();
+  const out = parseJsonReply((((j.candidates||[])[0]||{}).content||{}).parts ? j.candidates[0].content.parts.map(p=>p.text||"").join("") : "");
+  if (!out) throw {code:"api", message:"The reply could not be understood"};
+  return out;
+}
 async function readOnline(){
   if (!cur || !cur.photos.length) return;
   if (!onlineOk()) return openHelp();
   if (!Store.online()) return setAi({bad:true,retry:true,msg:"No connection. Use the on-phone reader now, and Online OCR when you have signal."});
   if (aiCtl) aiCtl.abort();
   const ctl = aiCtl = new AbortController(), forKey = cur.key;
-  setAi({busy:true,msg:"Online OCR is reading the plate…",stop:true});
+  setAi({busy:true,msg:"Online OCR is reading the photos…",stop:true});
   try {
     const photos = byTag(cur.photos).slice(0,6);
     const blobs = (await Promise.all(photos.map(p=>Store.photoBlob(p)))).filter(Boolean);
     if (!blobs.length) throw {code:"photo"};
-    const [T, models] = await Promise.all([loadList("types"), pickModel(ctl.signal)]);
-    const parts = [{text:promptFor(blobs.length, T.raw, photos.map((p,i)=>"photo "+(i+1)+": "+({plate:"nameplate",asset:"whole asset",label:"label or tag",barcode:"bar code"}[p.tag]||"other")).join(", "))}];
-    for (const b of blobs) parts.push({inline_data:{mime_type:"image/jpeg", data:await toB64(await shrinkFor(b, 2500000))}});
-    const call = async m => fetch(GAPI+"models/"+m+":generateContent",{method:"POST",signal:ctl.signal,headers:{"Content-Type":"application/json","x-goog-api-key":onlineKey()},
-      body:JSON.stringify({contents:[{role:"user",parts}],generationConfig:{temperature:0,responseMimeType:"application/json"}})});
-    // The service is sometimes overloaded for a few seconds: retry, then try the next model, before giving up.
-    let r = null, lastErr = null;
-    const wait = ms => new Promise((res,rej) => { const t = setTimeout(res, ms); ctl.signal.addEventListener("abort", () => { clearTimeout(t); rej({name:"AbortError"}); }, {once:true}); });
-    outer: for (const m of models) for (let attempt=0; attempt<2; attempt++) {
-      r = await call(m);
-      if (r.ok) break outer;
-      let msg = ""; try { msg = ((await r.clone().json()).error||{}).message||""; } catch(e) {}
-      const busy = r.status===503 || r.status===500 || /overloaded|high demand|unavailable/i.test(msg);
-      lastErr = {code: busy ? "busy" : r.status===429 ? "quota" : (r.status===401 || r.status===403 || /api key/i.test(msg)) ? "key" : "api", message:msg};
-      if (lastErr.code==="key") throw lastErr;
-      if (r.status===404) { try { localStorage.removeItem("pmbh-ocrmodel"); } catch(e) {} break; }
-      if (!busy && lastErr.code!=="quota") throw lastErr;
-      if (cur && cur.key===forKey) setAi({busy:true,msg:"Online OCR is busy. Trying again…",stop:true});
-      if (attempt===0) await wait(1800); else break;
-    }
-    if (!r || !r.ok) throw lastErr || {code:"api"};
-    const j = await r.json();
-    const txt = (((j.candidates||[])[0]||{}).content||{}).parts ? j.candidates[0].content.parts.map(p=>p.text||"").join("") : "";
-    let out = null; try { out = JSON.parse(txt); } catch(e) { const m = /\{[\s\S]*\}/.exec(txt); if (m) { try { out = JSON.parse(m[0]); } catch(x) {} } }
-    if (Array.isArray(out)) out = out[0];
-    if (!out || typeof out!=="object") throw {code:"api", message:"The reply could not be understood."};
+    const T = await loadList("types");
+    const prompt = promptFor(blobs.length, T.raw, photos.map((p,i)=>"photo "+(i+1)+": "+({plate:"nameplate",asset:"whole asset",label:"label or tag",barcode:"bar code"}[p.tag]||"other")).join(", "));
+    const imgs = []; for (const b of blobs) imgs.push(await toB64(await shrinkFor(b, 2500000)));
+    const onBusy = () => { if (cur && cur.key===forKey) setAi({busy:true,msg:"Online OCR is busy. Trying again…",stop:true}); };
+    const out = keyService(onlineKey())==="claude" ? await callClaude(prompt, imgs, ctl, onBusy) : await callGoogle(prompt, imgs, ctl, onBusy);
     if (!cur || cur.key!==forKey) return;
     if (!out.barcode && !cur.barcode) out.barcode = await detectBarcode(blobs);
     $("rawtext").hidden = true;
     const got = await applyRead(out, forKey); if (!got) return;
-    const unclear = Array.isArray(out.unclear) ? out.unclear.filter(k => typeof k==="string" && KEYMAP[k] && typeof out[k]==="string" && out[k].trim()).map(k=>F[KEYMAP[k]].label.toLowerCase().replace(/,.*$/,"")) : [];
+    const unclear = Array.isArray(out.unclear) ? out.unclear.filter(k => typeof k==="string" && KEYMAP[k] && typeof out[k]==="string" && out[k].trim()).map(k=>F[KEYMAP[k]] ? F[KEYMAP[k]].label.toLowerCase().replace(/,.*$/,"") : k) : [];
     const issue = typeof out.photo_issue==="string" ? out.photo_issue.trim() : "";
     setAi({retry:true, bad:!got.length, msg: got.length ? "Filled in: "+got.join(", ")+"."+(unclear.length?" Not confident about: "+unclear.join(", ")+".":"")+(issue?" "+issue:"")+" Check each against the plate."
-      : (issue || "Nothing legible was found.")+" Retake the photo closer and square on, or type the details."});
+      : (issue || "Nothing new was found.")+" Retake the photo closer and square on, or type the details."});
   } catch(e) {
     if (!cur || cur.key!==forKey) return;
     const code = e && e.code;
     if (e && e.name==="AbortError") return setAi({msg:"Stopped. Type the details or read again.",retry:true});
     if (code==="busy" || code==="quota" || !code) {   // do not leave the user stuck: read it on the phone instead
       if (aiCtl===ctl) aiCtl = null;
-      toast(code==="quota" ? "Online OCR has reached its limit for now. Reading on this phone instead." : "Online OCR is busy right now. Reading on this phone instead.");
+      toast(code==="quota" ? "Online OCR has reached its limit for now. Reading on this phone instead." : !code ? "Online OCR could not be reached. Reading on this phone instead." : "Online OCR is busy right now. Reading on this phone instead.");
       return readDevice();
     }
-    setAi({bad:true,retry:true,msg: code==="key" ? "The Online OCR key was not accepted. Check it in Setup." : code==="quota" ? "Online OCR has reached its free limit for now. Wait a minute, or use the on-phone reader."
-      : code==="api" ? "Online OCR could not process the photo"+(e.message?": "+String(e.message).slice(0,140):".")+" Use the on-phone reader or type the details."
-      : "Online OCR could not be reached. Use the on-phone reader, or try again when the signal is better."});
+    setAi({bad:true,retry:true,msg: code==="key" ? "Your Online OCR key was not accepted. Check it in Setup." : code==="billing" ? "Your Online OCR account has no credit left. Add credit, or use the on-phone reader."
+      : "Online OCR could not process the photos"+(e.message?": "+String(e.message).slice(0,140):".")+" Use the on-phone reader or type the details."});
   } finally { if (aiCtl===ctl) aiCtl = null; }
 }
 
@@ -1536,7 +1570,7 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
-const APP_VERSION = "18 Nov 2026, build 10";
+const APP_VERSION = "18 Nov 2026, build 11";
 let installEvt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
@@ -1570,13 +1604,17 @@ function installCard(){
 function openHelp(){
   openSheet("Setup", async body => {
     const p = await getPack();
-    const key = el("input",{type:"text",id:"ocr-key",placeholder:"Paste the Online OCR key",autocomplete:"off",autocapitalize:"off",spellcheck:"false",style:"width:100%;min-height:48px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg)"}); key.value = onlineKey();
+    const key = el("input",{type:"password",id:"ocr-key",placeholder:"Paste your Online OCR key",autocomplete:"off",autocapitalize:"off",spellcheck:"false",style:"width:100%;min-height:48px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg)"}); key.value = onlineKey();
     body.append(
       installCard(),
       el("div",{class:"opt"}, el("h3",{text:"Online OCR (optional)"}),
-        el("p",{text: onlineKey() ? "Set up on this phone. Online OCR reads worn or stamped plates better and also suggests the asset type. It sends the photos to an online reading service, so it needs signal." : "The on-phone reader needs nothing and keeps photos on the phone. Online OCR reads worn or stamped plates better, but sends the photos to an online reading service. It needs a key from the app's owner."}),
+        el("p",{text: onlineKey() ? "Your key is saved on this phone ("+(keyService(onlineKey())==="claude"?"Claude":"Google")+"). Online OCR reads worn or stamped plates better and also suggests the asset type. It sends the photos to that service, so it needs signal." : "The on-phone reader needs nothing and keeps photos on the phone. Online OCR reads worn or stamped plates better and also suggests the asset type. It sends the photos to an online service using your own key."}),
+        el("details",{}, el("summary",{text:"How to get a key"}), el("ol",{class:"steps",style:"margin-top:8px"},
+          el("li",{text:"Free: sign in at aistudio.google.com with a Google account, choose Get API key, then Create API key, and copy it."}),
+          el("li",{text:"Or Claude (paid, a few cents per asset): sign in at console.anthropic.com, add credit under Billing, then API keys, Create key, and copy it."}),
+          el("li",{text:"Paste it below and tap Save key. It stays on this phone only. The app works out which service the key belongs to."}))),
         key,
-        el("button",{type:"button",class:"btn block",text:"Save key",onclick:()=>{ try { localStorage.setItem("pmbh-ocrkey", key.value.trim()); localStorage.removeItem("pmbh-ocrmodel"); } catch(e) {} if (!key.value.trim() && reader==="online") reader = "device"; renderReader(); toast(key.value.trim() ? "Online OCR key saved on this phone." : "Online OCR key removed."); }})),
+        el("button",{type:"button",class:"btn block",text:"Save key",onclick:()=>{ try { localStorage.setItem("pmbh-ocrkey", key.value.trim()); localStorage.removeItem("pmbh-ocrmodel"); if (key.value.trim()) { localStorage.setItem("pmbh-reader","online"); reader = "online"; } } catch(e) {} if (!key.value.trim() && reader==="online") reader = "device"; renderReader(); toast(key.value.trim() ? "Online OCR key saved on this phone." : "Online OCR key removed."); }})),
       el("div",{class:"opt"}, el("h3",{text:"Where your work is kept"}),
         el("p",{text:"Assets and photos are stored on this phone only, inside this app. Nothing leaves the phone unless you use Online OCR or copy an export off it. Export at the end of each day: clearing the browser's site data, or removing the app, deletes them."})),
       el("div",{class:"opt"}, el("h3",{text:"Getting the data into AFM"}),
