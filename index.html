@@ -1096,12 +1096,25 @@ function getOcr(){
   ocrP.catch(() => { ocrP = null; });
   return ocrP;
 }
-async function prep(blob, invert, side){
-  const bmp = await createImageBitmap(blob), k = Math.min(1, (side||2400)/Math.max(bmp.width,bmp.height));
-  const c = document.createElement("canvas"); c.width = Math.round(bmp.width*k); c.height = Math.round(bmp.height*k);
-  const x = c.getContext("2d",{willReadFrequently:true}); x.drawImage(bmp,0,0,c.width,c.height);
+async function prep(blob, invert, side, opt){
+  opt = opt || {};
+  const src = blob instanceof HTMLCanvasElement ? blob : await createImageBitmap(blob);
+  const k = Math.min(opt.up ? 4 : 1, (side||2400)/Math.max(src.width,src.height)), rot = opt.rot||0;
+  const w0 = Math.round(src.width*k), h0 = Math.round(src.height*k), c = document.createElement("canvas");
+  c.width = rot%180 ? h0 : w0; c.height = rot%180 ? w0 : h0;
+  const x = c.getContext("2d",{willReadFrequently:true});
+  x.save(); x.translate(c.width/2, c.height/2); x.rotate(rot*Math.PI/180); x.drawImage(src, -w0/2, -h0/2, w0, h0); x.restore();
   const im = x.getImageData(0,0,c.width,c.height), d = im.data, hist = new Uint32Array(256), n = d.length/4;
-  for (let i=0;i<d.length;i+=4) { const g = (d[i]*77+d[i+1]*150+d[i+2]*29)>>8; d[i] = g; hist[g]++; }
+  let bg = null;
+  if (opt.flat) {   // even out glare and shadow: divide by a heavily blurred copy of the photo
+    const sw = Math.max(8, Math.round(c.width/28)), sh = Math.max(8, Math.round(c.height/28)), s1 = document.createElement("canvas"), s2 = document.createElement("canvas");
+    s1.width = sw; s1.height = sh; s1.getContext("2d").drawImage(c,0,0,sw,sh);
+    s2.width = c.width; s2.height = c.height; const x2 = s2.getContext("2d",{willReadFrequently:true}); x2.imageSmoothingQuality = "high"; x2.drawImage(s1,0,0,c.width,c.height);
+    bg = x2.getImageData(0,0,c.width,c.height).data;
+  }
+  for (let i=0;i<d.length;i+=4) { let g = (d[i]*77+d[i+1]*150+d[i+2]*29)>>8;
+    if (bg) { const b = (bg[i]*77+bg[i+1]*150+bg[i+2]*29)>>8; g = Math.max(0,Math.min(255, Math.round(g*190/Math.max(b,8)))); }
+    d[i] = g; hist[g]++; }
   let lo = 0, hi = 255, a = 0; while (lo<254 && a+hist[lo]<n*.02) a += hist[lo++]; a = 0; while (hi>lo+1 && a+hist[hi]<n*.02) a += hist[hi--];
   const sc = 255/Math.max(1,hi-lo);
   for (let i=0;i<d.length;i+=4) { let g = Math.max(0,Math.min(255,(d[i]-lo)*sc)); if (invert) g = 255-g; d[i] = d[i+1] = d[i+2] = g; }
@@ -1152,12 +1165,14 @@ function parsePlate(words, dict){
   const out = {make:"", model:"", model_name:"", serial:"", manufacture_date:"", details:"", asset_id:"", asset_label:"", capacity:"", asset_type:"", unclear:[], text, strong:words.filter(w=>w.c>=60).length};
   const clean = t => t.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g,"");
   const pick = (toks, needDigit) => toks.map(clean).filter(t => t && !STOP.test(t)).find(t => t.length>=3 && (!needDigit || /\d/.test(t))) || "";
+  const anchors = {}; out._anchors = anchors;
+  const ANYLAB = /SERIA[L1I]|\bSER\b|S\/N|\bSN\b|MODEL|\bTYPE\b|MFG|DATE/;
   const valueAfter = (re, needDigit, raw) => {
     for (let i=0;i<lines.length;i++) { const U = lines[i].text.toUpperCase(), m = re.exec(U); if (!m) continue;
       const rest = lines[i].text.slice(m.index+m[0].length);
-      if (raw && rest.trim()) return rest;
+      if (raw && rest.trim()) { anchors[re.source] = lines[i].w.find(w => re.test(" "+w.t.toUpperCase()+" ")) || null; return rest; }
       let v = pick(rest.split(/\s+/), needDigit);
-      if (!v && lines[i+1]) {            // value printed under its label: take the word below that lines up with it
+      if (!v && lines[i+1] && !(raw && ANYLAB.test(lines[i+1].text.toUpperCase()))) {   // value printed under its label: take the word below that lines up with it
         const lab = lines[i].w.find(w => re.test(" "+w.t.toUpperCase()+" ")) || lines[i].w[0], lx = (lab.x0+lab.x1)/2;
         const below = lines[i+1].w.slice().sort((a,b)=>Math.abs((a.x0+a.x1)/2-lx)-Math.abs((b.x0+b.x1)/2-lx));
         if (raw) return lines[i+1].text;
@@ -1168,9 +1183,11 @@ function parsePlate(words, dict){
         const right = words.filter(w => w.x0 > lab.x1-2 && Math.abs((w.y0+w.y1)/2-cy) < h*1.3).sort((a,b)=>a.x0-b.x0);
         v = pick(right.map(w=>w.t), needDigit);
       }
-      if (v) return v; }
+      if (v) { anchors[re.source] = lines[i].w.find(w => re.test(" "+w.t.toUpperCase()+" ")) || null; return v; }
+      if (!anchors[re.source]) anchors[re.source] = lines[i].w.find(w => re.test(" "+w.t.toUpperCase()+" ")) || null; }
     return ""; };
   out.serial = valueAfter(RE_SERIAL, true);
+  out._serialConf = out.serial ? (words.find(w => clean(w.t).toUpperCase()===out.serial.toUpperCase())||{c:0}).c : 0;
   // serials are usually digits followed by one or two letters (4004218T, 1012345AB); OCR often splits the letters off
   if (out.serial && /^\d+$/.test(out.serial)) { const m = new RegExp("\\b"+out.serial+"\\s?([A-Z]{1,2})\\b").exec(text.toUpperCase()); if (m && !/^(V|A|HZ|KW|W|KG|L|PH|NO)$/.test(m[1])) out.serial += m[1]; }
   if (!out.serial) { const m = /(?:^|\s)(\d{5,10}[A-Z]{1,2})(?=\s|$)/m.exec(text.toUpperCase()); if (m && !/(KW|KG|HZ|PA|MM|CM|LT)$/.test(m[1])) { out.serial = m[1]; out.unclear.push("serial"); } }
@@ -1187,14 +1204,20 @@ function parsePlate(words, dict){
   else if (RE_SERIAL.test(text.toUpperCase()) || RE_MODEL.test(text.toUpperCase())) { const big = words.filter(w => /^[A-Za-z][A-Za-z&\-]{2,}$/.test(clean(w.t)) && !STOP.test(clean(w.t))).sort((a,b)=>(b.y1-b.y0)-(a.y1-a.y0))[0];
     if (big) { out.make = clean(big.t); out.unclear.push("make"); } }
   // model: prefer a model AFM already holds for that make, then a labelled value
-  let labelled = valueAfter(RE_MODEL, true) || valueAfter(RE_TYPE, true);
-  if (labelled) { const m = new RegExp("(?:MODEL|MOD|M\\/N|TYPE)[^A-Z0-9]*(?:NO\\.?|NUMBER)?[^A-Z0-9]*([A-Z]{2,4})\\s+"+labelled.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b").exec(text.toUpperCase()); if (m && !STOP.test(m[1])) labelled = m[1]+" "+labelled; }
+  // model: the words after the label, up to the next label (models can contain spaces: "CR 10-4 A-FJ-A-E-HQQE", "OSA 172RKTMQ")
+  let labelled = "";
+  const rawM = valueAfter(RE_MODEL, false, true);
+  if (rawM) { const toks = rawM.toUpperCase().split(/\s+/).map(clean).filter(Boolean); const keep = [];
+    for (const t of toks) { if (ANYLAB.test(t) || /^(VOLT|VOLTAGE|RATED|CAPACITY|REFRIGERANT|PHASE|POWER|INPUT|CURRENT|COOLING|HEATING)/.test(t)) break; if (STOP.test(t) && !keep.length) continue; keep.push(t); if (keep.length>=5) break; }
+    const j = keep.join(" "); if (/\d/.test(j) && j.length<=32) labelled = j; }
+  if (!labelled) labelled = valueAfter(RE_MODEL, true) || valueAfter(RE_TYPE, true);
+  const confOf = v => { const ws = words.filter(w => v.toUpperCase().split(" ").includes(clean(w.t).toUpperCase())); return ws.length ? Math.min(...ws.map(w=>w.c)) : 0; };
   const mn = valueAfter(RE_MODELNAME, false, true); if (mn) out.model_name = mn.replace(/\s+/g," ").trim().slice(0,60);
   if (best) {
     let hit = "";
     for (const m of best.e.models) { const n = fold(m); if (n.length>=3 && n.length>fold(hit).length && norm.includes(n)) hit = m; }
     if (hit && labelled && fold(labelled).length>fold(hit).length+2 && !fold(labelled).includes(fold(hit))) hit = "";   // the plate's own labelled model wins over a shorter chance match
-    if (!hit && labelled && fold(labelled).length>=5) {   // OCR slips: snap to the nearest model AFM already holds for this make
+    if (!hit && labelled && fold(labelled).length>=5 && confOf(labelled)<55) {   // an unsure read: snap to the nearest model AFM already holds for this make
       let bd = 3; const fl = fold(labelled);
       for (const m of best.e.models) { const d = lev(fl, fold(m), 2); if (d<bd) { bd = d; hit = m; } }
       if (hit) out.unclear.push("model");
@@ -1215,6 +1238,33 @@ function parsePlate(words, dict){
   out.details = lines.map(l=>l.text).filter(t => /\d\s?(KW|KVA|W|V|VAC|HZ|A|KG|L|KPA|MPA|BAR|RPM|HP|L\/S|L\/MIN)\b|\bR-?\d{2,3}[A-Z]?\b|\bIP\d{2}\b/i.test(t)).slice(0,5).join("; ").slice(0,240);
   return out;
 }
+// Second, zoomed read of the serial and model: crop the strip beside each label, enlarge it, and read it as a single line.
+async function zoomRead(w, canvas, res){
+  for (const [field, re] of [["serial", RE_SERIAL], ["model", RE_MODEL]]) {
+    const a = res._anchors && res._anchors[re.source]; if (!a || !canvas) continue;
+    const h = Math.max(8, a.y1-a.y0), x0 = Math.max(0, a.x1+2), y0 = Math.max(0, a.y0-h*.55), x1 = Math.min(canvas.width, a.x1+h*24), y1 = Math.min(canvas.height, a.y1+h*.55);
+    if (x1-x0 < h*2) continue;
+    const k = Math.min(4, Math.max(1, 64/h)), c = document.createElement("canvas"); c.width = Math.round((x1-x0)*k); c.height = Math.round((y1-y0)*k);
+    const g = c.getContext("2d"); g.imageSmoothingQuality = "high"; g.fillStyle = "#fff"; g.fillRect(0,0,c.width,c.height); g.drawImage(canvas, x0, y0, x1-x0, y1-y0, 0, 0, c.width, c.height);
+    await w.setParameters({tessedit_pageseg_mode:"7", tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/. #:"});
+    let ws = []; try { ws = wordsOf((await w.recognize(c, {}, {text:true,blocks:true})).data); } finally { await w.setParameters({tessedit_pageseg_mode:"11", tessedit_char_whitelist:""}); }
+    const toks = ws.map(x => ({t:x.t.replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g,""), c:x.c})).filter(x => x.t && !/^(NO|N0|NUMBER|#)$/.test(x.t));
+    if (!toks.length) continue;
+    if (field==="serial") {
+      const i = toks.findIndex(x => /\d/.test(x.t) && x.t.length>=4); if (i<0) continue;
+      let v = toks[i].t, c2 = toks[i].c; if (/^\d+$/.test(v) && toks[i+1] && /^[A-Z]{1,2}$/.test(toks[i+1].t) && !/^(V|A|HZ|KW|W|KG|L|PH)$/.test(toks[i+1].t)) v += toks[i+1].t;
+      if (c2>=70 && (!res.serial || (c2 > (res._serialConf||0)+5 && v!==res.serial))) { res.serial = v; res._serialConf = c2; }
+      else if (!res.serial && c2>=50) { res.serial = v; res.unclear.push("serial"); }
+    } else {
+      const keep = []; for (const x of toks) { if (/^(SERIA|SER$|SN$|S\/N|VOLT|RATED|CAPACITY|REFRIG|TYPE)/.test(x.t)) break; keep.push(x); if (keep.length>=5) break; }
+      const v = keep.map(x=>x.t).join(" "), c2 = keep.length ? Math.min(...keep.map(x=>x.c)) : 0;
+      if (/\d/.test(v) && v.length<=32 && c2>=75 && (!res.model || fold(res.model)!==fold(v))) {
+        const snapped = res.unclear.includes("model");   // the model was matched to AFM's nearest; a clear zoomed read is better evidence
+        if (!res.model || c2>=80) { res.model = v; if (snapped) res.unclear = res.unclear.filter(k => k!=="model"); }
+      }
+    }
+  }
+}
 const ocrCache = new Map();   // photo -> what was read from it, so adding a photo only reads the new one
 const byTag = ps => ps.slice();
 async function readDevice(){
@@ -1231,17 +1281,22 @@ async function readDevice(){
       if (!ocrCache.has(key)) {
         n++; const blob = await Store.photoBlob(p); if (!blob) continue;
         ocrProgress = pr => { if (cur && cur.key===forKey) setAi({busy:true,msg:"Reading on this phone… photo "+n+" of "+todo.length+", "+Math.round(pr*100)+"%"}); };
-        let res = parsePlate(wordsOf((await w.recognize(await prep(blob,false), {}, {text:true,blocks:true})).data), dict);
+        const firstCanvas = await prep(blob,false);
+        let res = parsePlate(wordsOf((await w.recognize(firstCanvas, {}, {text:true,blocks:true})).data), dict);
         // weak read: try light-on-dark, then a smaller copy (very large lettering, as on a close-up label, reads badly at full size)
         // keep trying while the serial or model is missing: tables with drawn boxes and very large lettering often need another pass
         const score = r => r.strong + (r.serial?20:0) + (r.model?10:0) + (r.make?3:0);
-        for (const [inv, side, psm] of [[false,1600,"6"],[true,2400,"11"],[false,1400,"11"],[false,900,"11"],[false,1100,"6"],[false,700,"11"],[true,900,"11"]]) {
+        let bestCanvas = firstCanvas;
+        const passes = [[false,2000,"11",{flat:true}],[false,1600,"6"],[true,2400,"11"],[false,1400,"11"],[false,900,"11"],[false,1100,"6"],[false,700,"11"],[false,1600,"11",{rot:90}],[false,1600,"11",{rot:270}],[true,900,"11"]];
+        for (const [inv, side, psm, opt] of passes) {
           if (res.strong>=3 && res.serial && res.model) break;
+          if (opt && opt.rot && (res.serial || res.model || res.make)) continue;   // only turn the photo when nothing useful was read upright
           if (psm!=="11") await w.setParameters({tessedit_pageseg_mode:psm});
-          let r2; try { r2 = parsePlate(wordsOf((await w.recognize(await prep(blob,inv,side), {}, {text:true,blocks:true})).data), dict); } finally { if (psm!=="11") await w.setParameters({tessedit_pageseg_mode:"11"}); }
-          if (score(r2)>score(res)) { for (const k of ["make","model","model_name","serial","manufacture_date"]) if (!r2[k] && res[k]) r2[k] = res[k]; res = r2; }
+          let r2, cv; try { cv = await prep(blob,inv,side,opt); r2 = parsePlate(wordsOf((await w.recognize(cv, {}, {text:true,blocks:true})).data), dict); } finally { if (psm!=="11") await w.setParameters({tessedit_pageseg_mode:"11"}); }
+          if (score(r2)>score(res)) { for (const k of ["make","model","model_name","serial","manufacture_date"]) if (!r2[k] && res[k]) r2[k] = res[k]; res = r2; bestCanvas = cv; }
           else for (const k of ["make","model","model_name","serial","manufacture_date","asset_id","asset_label","capacity","asset_type"]) if (!res[k] && r2[k]) res[k] = r2[k];
         }
+        try { await zoomRead(w, bestCanvas, res); } catch(e) {}
         ocrCache.set(key, res);
         if (!cur || cur.key!==forKey) return;
       }
@@ -1537,7 +1592,12 @@ async function deleteCur(){
 
 /* ---------- export ---------- */
 const safe = s => String(s||"").replace(/[^A-Za-z0-9._-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40);
-const photoNames = (r,i) => (r.photos||[]).map((p,n) => String(i+1).padStart(3,"0")+"_"+(safe(r.id||r.barcode||r.serial||r.name)||"asset")+"_"+(n+1)+".jpg");
+// Folder and file names that work on Windows: no \ / : * ? " < > | and no trailing dots or spaces
+const winSafe = (s, max) => String(s||"").replace(/[\\\/:*?"<>|\u0000-\u001f]+/g," ").replace(/\s+/g," ").trim().replace(/[. ]+$/,"").slice(0, max||80).trim();
+const spaceId = r => String(r.location||"").split("\\").filter(Boolean).pop() || "";
+// Photos/<row> <asset name> - <space>/<asset ID>_1.jpg : one folder per asset
+const photoFolder = (r,i) => winSafe(String(i+1).padStart(3,"0")+" "+(r.name || [r.make,r.model].filter(Boolean).join(" ") || "Unnamed asset")+(spaceId(r) ? " - "+spaceId(r) : " - no space"), 100);
+const photoNames = (r,i) => (r.photos||[]).map((p,n) => "Photos/"+photoFolder(r,i)+"/"+(winSafe(r.id||r.barcode||r.serial,40).replace(/ /g,"_") || "photo")+"_"+(n+1)+".jpg");
 const usedTemplates = () => PACK.templates.filter(t => records.some(r => defsOf(r).tpl.id===t.id));
 const xlsxName = t => "Asset Capture - "+t.title+" - "+today()+" - NOT the upload file.xlsx";
 function buildWorkbook(tpl, withPhotos){
@@ -1556,7 +1616,7 @@ function buildWorkbook(tpl, withPhotos){
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = tpl.headers.map(h => ({wch:Math.max(14,h.length+2)}));
   const log = [["Row","Asset ID","Name","Asset type","Service area","Asset label","Capacity / energy / utility","Make","Model name","Model number","Serial number","Photo files","Captured","Still missing"]];
-  mine.forEach(([r,i],n) => log.push([String(n+1), r.id||"", r.name||"", r.atype||"", r.area||"", r.label||"", r.cap||"", r.make||"", r.modelName||"", r.model||"", r.serial||"", withPhotos ? photoNames(r,i).map(x=>"Photos/"+x).join("; ") : (r.photos||[]).length+" photo(s) in the app", (r.createdAt||"").slice(0,16).replace("T"," "), missing(r).map(k=>Ft[k].label).join(", ")]));
+  mine.forEach(([r,i],n) => log.push([String(n+1), r.id||"", r.name||"", r.atype||"", r.area||"", r.label||"", r.cap||"", r.make||"", r.modelName||"", r.model||"", r.serial||"", withPhotos ? photoNames(r,i).map(x=>x).join("; ") : (r.photos||[]).length+" photo(s) in the app", (r.createdAt||"").slice(0,16).replace("T"," "), missing(r).map(k=>Ft[k].label).join(", ")]));
   const ws2 = XLSX.utils.aoa_to_sheet(log); ws2["!cols"] = [8,14,34,24,16,14,20,18,18,22,22,44,18,22].map(w=>({wch:w}));
   const wb = XLSX.utils.book_new();
   const readme = XLSX.utils.aoa_to_sheet([
@@ -1584,14 +1644,15 @@ async function doExport(kind, btn, status){
     if (typeof XLSX==="undefined" || (kind==="zip" && typeof JSZip==="undefined")) throw {code:"lib"};
     let blob, name, lost = 0;
     const used = usedTemplates();
+    const top = "Asset Capture "+today()+"/";   // everything sits inside one folder when unzipped
     if (kind==="xlsx" && used.length===1) { blob = buildWorkbook(used[0], false); name = xlsxName(used[0]); }
-    else if (kind==="xlsx") { const zip = new JSZip(); for (const t of used) zip.file(xlsxName(t), buildWorkbook(t, false));
+    else if (kind==="xlsx") { const zip = new JSZip(); for (const t of used) zip.file(top+xlsxName(t), buildWorkbook(t, false));
       blob = await zip.generateAsync({type:"blob",compression:"DEFLATE",mimeType:"application/zip"}); name = "Asset Capture - "+today()+" - Excel - NOT the upload file.zip"; }
     else {
-      const zip = new JSZip(); for (const t of used) zip.file(xlsxName(t), buildWorkbook(t, true));
+      const zip = new JSZip(); for (const t of used) zip.file(top+xlsxName(t), buildWorkbook(t, true));
       const total = records.reduce((n,r)=>n+(r.photos||[]).length,0); let done = 0;
       for (let i=0;i<records.length;i++) { const names = photoNames(records[i],i);
-        for (let n=0;n<names.length;n++) { status.textContent = "Collecting photo "+(++done)+" of "+total+"…"; const b = await Store.photoBlob(records[i].photos[n]); if (b) zip.file("Photos/"+names[n], b); else lost++; } }
+        for (let n=0;n<names.length;n++) { status.textContent = "Collecting photo "+(++done)+" of "+total+"…"; const b = await Store.photoBlob(records[i].photos[n]); if (b) zip.file(top+names[n], b); else lost++; } }
       status.textContent = "Packing…";
       blob = await zip.generateAsync({type:"blob",compression:"STORE",mimeType:"application/zip"}); name = "Asset Capture - "+today()+" - with photos - NOT the upload file.zip";
     }
@@ -1617,7 +1678,7 @@ function openExport(){
     b1.onclick = () => doExport("zip", b1, status); b2.onclick = () => doExport("xlsx", b2, status);
     body.append(
       el("div",{class:"opt"}, el("h3",{text:"Excel and photos"}), el("p",{text:records.length+(records.length===1?" asset":" assets")+" and "+nPhotos+(nPhotos===1?" photo":" photos")+", in one ZIP file:"}),
-        el("pre",{class:"tree",text:usedTemplates().map(t=>"├─ "+t.title+" (Excel)\n").join("")+"└─ Photos/\n   ├─ 001_<asset ID>_1.jpg\n   └─ …"}), b1),
+        el("pre",{class:"tree",text:usedTemplates().map(t=>"├─ "+t.title+" (Excel)\n").join("")+"└─ Photos/\n   ├─ 001 <asset name> - <space ID>/\n   └─ …"}), b1),
       el("div",{class:"opt"}, el("h3",{text:"Excel only"}), el("p",{text:(usedTemplates().length>1 ? "One Excel file per asset category, in one ZIP file." : "One Excel file.")+" Each opens on a READ ME sheet; the data sheet to copy from is the next tab."}), b2),
       status,
       el("div",{class:"opt"}, el("h3",{text:"Clear the list"}), el("p",{text:"Once the file is safely on your PC, remove these assets and photos from this phone to start the next batch."}),
@@ -1626,7 +1687,7 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
-const APP_VERSION = "18 Nov 2026, build 21";
+const APP_VERSION = "18 Nov 2026, build 23";
 let installEvt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
