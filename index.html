@@ -254,6 +254,14 @@ section.grp .fields{padding:0 16px 16px}
 .scan .aim{position:absolute;left:10%;right:10%;top:34%;bottom:34%;border:3px solid var(--accent);border-radius:10px;box-shadow:0 0 0 999px rgba(0,0,0,.35)}
 .card{-webkit-touch-callout:none;user-select:none;-webkit-user-select:none}
 .card.pressing{transform:scale(.98);filter:brightness(.93)}
+.selbar{position:sticky;top:76px;z-index:4;display:flex;align-items:center;gap:12px;justify-content:space-between;background:var(--accent-soft);border:2px solid var(--accent);border-radius:var(--r);padding:8px 12px;margin-top:12px}
+.selbar b{font:700 20px var(--display)}
+.selbar .btn{min-height:44px}
+.card{position:relative}
+.card.picked{background:var(--accent-soft);box-shadow:0 0 0 3px var(--accent)}
+.tickbox{position:absolute;top:8px;left:8px;z-index:1;width:30px;height:30px;border-radius:8px;border:2px solid var(--line);background:var(--surface);display:grid;place-items:center;font:700 18px var(--body);color:#fff}
+.card.picked .tickbox{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.bar .btn.danger{background:var(--bad);border-color:var(--bad);color:#fff}
 .tip{font-size:15px;color:var(--muted);text-align:center;margin:2px 0 0}
 .warnbox{border-radius:var(--r);padding:14px;background:var(--warn-soft);color:var(--warn);display:flex;flex-direction:column;gap:6px}
 .warnbox b{font:700 19px var(--display)}
@@ -285,10 +293,13 @@ section.grp .fields{padding:0 16px 16px}
     <div class="stats" id="stats"></div>
     <div class="summary" id="summary"></div>
     <div class="search" id="searchbox" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg><input type="search" id="q" placeholder="Search name, serial, barcode or room" aria-label="Search assets" autocomplete="off"></div>
+    <div id="selbar" class="selbar" hidden></div>
     <div id="list" class="cards"></div>
   </main>
   <div class="bar"><div class="wrap">
     <button type="button" class="btn" id="btn-export"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V4"/><path d="M8 8l4-4 4 4"/><path d="M5 13v6h14v-6"/></svg>Export</button>
+    <button type="button" class="btn" id="btn-selcancel" hidden>Cancel</button>
+    <button type="button" class="btn danger" id="btn-seldel" hidden>Delete</button>
     <button type="button" class="btn primary" id="btn-add"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l1.5-2.5h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Add asset</button>
   </div></div>
 </div>
@@ -463,11 +474,11 @@ const ICON = {
 };
 function srcInfo(src, f){
   if (src==="types") return {title:"Asset type",strip:"",ph:"Search asset type, e.g. scales, chiller, pump",free:"Not in the asset type list."};
-  if (src.startsWith("Location")) return {title:"Primary location",strip:"\\Locations\\",ph:"Search building, level or room"};
-  if (src==="Organization:triPathTX") return {title:"Organization",strip:"\\Organizations\\",ph:"Search department"};
-  if (src.startsWith("triCostCode")) return {title:"Operator (cost code)",strip:"",ph:"Search cost code"};
-  if (src==="Organization:triNameTX") return {title:f ? f.label : "Supplier",strip:"",ph:"Search, or type the name",free:"Not in the supplier list. Check the spelling."};
-  if (/Spec:/.test(src)) return {title:"Specification",strip:"",ph:"Search make, model or type"};
+  if (src.startsWith("Location")) return {title:"Primary location",strip:"\\Locations\\",ph:"Search building, level or room",hint:"Type a room number or name, e.g. ED031 or plant room."};
+  if (src==="Organization:triPathTX") return {title:"Organization",strip:"\\Organizations\\",ph:"Search department",hint:"Type a department or service name."};
+  if (src.startsWith("triCostCode")) return {title:"Operator (cost code)",strip:"",ph:"Search cost code",hint:"Type a cost code number or name."};
+  if (src==="Organization:triNameTX") return {title:f ? f.label : "Supplier",strip:"",ph:"Search, or type the name",hint:"Type the company name. If it is not listed, you can use what you typed.",free:"Not in the supplier list. Check the spelling."};
+  if (/Spec:/.test(src)) return {title:"Specification",strip:"",ph:"Search make, model or type",hint:"Type the make or model number, e.g. Daikin FTXM35."};
   return {title:f ? f.label : "Choose",strip:"",ph:"Search"};
 }
 // Building System Class follows from the asset type. First matching rule wins; the user can still change it.
@@ -698,25 +709,40 @@ function show(view){ $("view-lock").hidden = view!=="lock"; $("view-list").hidde
 
 /* ---------- list view ---------- */
 let query = "";
-function holdToDelete(card, r){
+let selecting = false; const picked = new Set();
+function holdToSelect(card, r){
   let t = 0, held = false, x0 = 0, y0 = 0;
   const cancel = () => { clearTimeout(t); card.classList.remove("pressing"); };
   card.addEventListener("pointerdown", e => { held = false; x0 = e.clientX; y0 = e.clientY; card.classList.add("pressing");
-    t = setTimeout(() => { held = true; card.classList.remove("pressing"); try { navigator.vibrate && navigator.vibrate(30); } catch(x) {} askDelete(r); }, 550); });
+    t = setTimeout(() => { held = true; card.classList.remove("pressing"); try { navigator.vibrate && navigator.vibrate(30); } catch(x) {}
+      selecting = true; picked.add(r.key); renderList(); }, 550); });
   card.addEventListener("pointermove", e => { if (Math.abs(e.clientX-x0)>10 || Math.abs(e.clientY-y0)>10) cancel(); });
   for (const ev of ["pointerup","pointerleave","pointercancel"]) card.addEventListener(ev, cancel);
   card.addEventListener("contextmenu", e => e.preventDefault());
-  card.addEventListener("click", () => { if (held) { held = false; return; } openEdit(r); });
+  card.addEventListener("click", () => {
+    if (held) { held = false; return; }
+    if (!selecting) return openEdit(r);
+    if (picked.has(r.key)) picked.delete(r.key); else picked.add(r.key);
+    if (!picked.size) selecting = false;
+    renderList();
+  });
   card.querySelectorAll("img").forEach(im => im.setAttribute("draggable","false"));
 }
-async function askDelete(r){
-  const n = (r.photos||[]).length, name = r.name || [r.make,r.model].filter(Boolean).join(" ") || "This asset";
-  if (!(await confirmSheet("Delete this asset?", name+(n ? " and its "+(n===1?"photo":n+" photos") : "")+" will be removed from this phone for good.", "Delete", true))) return;
-  try { await Store.del(r.key); } catch(e) { return toast("Could not delete. Try again."); }
-  for (const p of r.photos||[]) Store.delPhoto(p);
-  records = records.filter(x => x.key!==r.key); renderList(); toast("Deleted.");
+function endSelect(){ selecting = false; picked.clear(); renderList(); }
+async function deletePicked(){
+  const list = records.filter(r => picked.has(r.key)); if (!list.length) return;
+  const nPhotos = list.reduce((a,r)=>a+(r.photos||[]).length,0), one = list.length===1;
+  const name = one ? (list[0].name || [list[0].make,list[0].model].filter(Boolean).join(" ") || "This asset") : list.length+" assets";
+  if (!(await confirmSheet(one ? "Delete this asset?" : "Delete "+list.length+" assets?", name+(nPhotos ? " and "+(nPhotos===1?"1 photo":nPhotos+" photos") : "")+" will be removed from this phone for good. Do this only after the export is safely on your PC.", "Delete", true))) return;
+  const left = [];
+  for (const r of list) { try { await Store.del(r.key); for (const p of r.photos||[]) Store.delPhoto(p); } catch(e) { left.push(r.key); } }
+  records = records.filter(r => !picked.has(r.key) || left.includes(r.key));
+  picked.clear(); selecting = false; renderList();
+  toast(left.length ? left.length+" could not be deleted. Try again." : (one ? "Deleted." : list.length+" assets deleted."));
 }
 function renderList(){
+  for (const k of [...picked]) if (!records.some(r=>r.key===k)) picked.delete(k);
+  if (selecting && !records.length) selecting = false;
   const sum = $("summary"), list = $("list"), stats = $("stats"); sum.replaceChildren(); list.replaceChildren(); stats.replaceChildren();
   const need = records.filter(r => missing(r).length).length;
   const tile = (n, label, cls) => el("div",{class:"stat "+(cls||"")}, el("b",{text:String(n)}), el("span",{text:label}));
@@ -748,9 +774,18 @@ function renderList(){
         loc ? el("div",{class:"sub",text:loc}) : null,
         el("div",{style:"display:flex;gap:6px;flex-wrap:wrap;margin-top:2px"}, m.length ? el("span",{class:"chip warn",text:needText(r,m)}) : el("span",{class:"chip good",text:"Ready"}), el("span",{class:"chip",text:defsOf(r).tpl.title}), dupOf(r) ? el("span",{class:"chip bad",text:"Same "+dupOf(r).why+" as "+dupOf(r).n}) : null)),
       el("div",{class:"num",text:String(i+1).padStart(3,"0")}));
-    holdToDelete(card, r); list.append(card);
+    if (selecting) { card.classList.toggle("picked", picked.has(r.key)); card.setAttribute("aria-pressed", picked.has(r.key) ? "true" : "false");
+      card.prepend(el("span",{class:"tickbox","aria-hidden":"true",text:picked.has(r.key)?"✓":""})); }
+    holdToSelect(card, r); list.append(card);
   });
-  if (records.length) list.append(el("p",{class:"tip",text:"Press and hold an asset to delete it."}));
+  if (records.length && !selecting) list.append(el("p",{class:"tip",text:"To delete, press and hold an asset. Then tap others, or Select all."}));
+  // selection mode: a bar at the top of the list, and Delete in place of Export / Add
+  const selbar = $("selbar"); selbar.hidden = !selecting;
+  if (selecting) { const all = records.length && picked.size===records.length;
+    selbar.replaceChildren(el("b",{text:picked.size+" selected"}),
+      el("button",{type:"button",class:"btn",text:all ? "Clear all" : "Select all",onclick:()=>{ if (all) picked.clear(); else records.forEach(r=>picked.add(r.key)); if (!picked.size) selecting = false; renderList(); }})); }
+  $("btn-export").hidden = $("btn-add").hidden = selecting; $("btn-selcancel").hidden = $("btn-seldel").hidden = !selecting;
+  $("btn-seldel").textContent = "Delete "+(picked.size||"");
   if (records.length && !shown) list.append(el("div",{class:"note",text:"No asset matches that search.",style:"padding:12px 4px"}));
 }
 
@@ -1529,7 +1564,7 @@ function openPicker(k){
         const counts = {}; for (const o of L.meta) counts[o.g] = (counts[o.g]||0)+1;
         const tiles = el("div",{class:"tiles"});
         for (const g of Object.keys(ICON).filter(g=>counts[g])) { const b = el("button",{type:"button",class:"tile",onclick:()=>{ group = g; draw(); }}); b.insertAdjacentHTML("beforeend", ICON[g]); b.append(g, el("small",{text:counts[g]+" types"})); tiles.append(b); }
-        res.append(el("div",{class:"note",text:"Pick a discipline, or type above to search all "+L.raw.length+" asset types.",style:"padding:4px 0 8px"}), tiles);
+        res.append(el("div",{class:"note",text:"Pick a discipline, or type above to search.",style:"padding:4px 0 8px"}), tiles);
         items = [];
       } else if (!q && L.meta) {
         res.append(el("button",{type:"button",class:"free",text:"‹ All disciplines",onclick:()=>{ group = ""; draw(); }}));
@@ -1538,7 +1573,7 @@ function openPicker(k){
         const recent = [...new Set(records.map(r=>r[k]).filter(Boolean).reverse())].slice(0,8);
         items = k==="spec" && specSugg.length ? specSugg : recent;
         if (items.length) res.append(el("div",{class:"note",text:k==="spec"&&specSugg.length?"Closest matches for this make and model":"Used recently",style:"padding:4px 0"}));
-        else res.append(el("div",{class:"note",text: L.failed ? "There is no list for this field. Type the value and use it as written." : "Type to search "+L.raw.length.toLocaleString()+" entries.",style:"padding:8px 0"}));
+        else res.append(el("div",{class:"note",text: L.failed ? "There is no list for this field. Type the value and use it as written." : (S.hint || "Start typing to search."),style:"padding:8px 0"}));
       } else {
         items = searchList(L, q);
         if (!items.length) res.append(el("div",{class:"note",text:"No match in the template list.",style:"padding:8px 0"}));
@@ -1687,7 +1722,7 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
-const APP_VERSION = "18 Nov 2026, build 23";
+const APP_VERSION = "18 Nov 2026, build 24";
 let installEvt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
@@ -1746,6 +1781,7 @@ function openHelp(){
 
 /* ---------- wiring ---------- */
 $("btn-add").onclick = () => openEdit(null);
+$("btn-selcancel").onclick = endSelect; $("btn-seldel").onclick = deletePicked;
 $("btn-export").onclick = openExport;
 $("btn-help").onclick = openHelp;
 $("btn-back").onclick = leaveEdit;
