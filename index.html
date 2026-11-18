@@ -347,7 +347,6 @@ const CAPTURE = {   // captured for every category; kept in the capture log shee
   modelName:{label:"Model name",type:"text",hint:"The product name, if the plate gives one"},
   model:{label:"Model number",type:"text"},
   bodyProt:{label:"Body or cardiac protected circuit?",type:"select",opts:["Yes","No"],mnc:true},
-  notes:{label:"Other nameplate details",type:"textarea",hint:"Kept in the capture log sheet, not in the data load"},
 };
 let PACK = null, F = {}, STEPS = [], TPL = null;
 const defCache = {};
@@ -370,7 +369,7 @@ function defsFor(id){
     Fm[key] = d; order.push(key);
   }
   const used = new Set(), take = ks => { const r = [...new Set(ks)].filter(k => Fm[k] && !used.has(k)); r.forEach(k=>used.add(k)); return r; };
-  const plate = take(["make","modelName","model","serial","mfgDate","notes"]);
+  const plate = take(["make","modelName","model","serial","mfgDate"]);
   const spec = take(["spec","cls"].concat(order.filter(k=>Fm[k].group==="Spec Information")));
   const asset = take(["id","barcode","parent","atype","area","label","cap","name","location","position","fixed","bodyProt"]);
   const cond = take(["condition","criticality","env","util","assessDate","comments"].concat(order.filter(k=>Fm[k].tab==="Assessment")));
@@ -378,7 +377,7 @@ function defsFor(id){
   const groups = [];
   for (const k of order) if (!used.has(k)) { let g = groups.find(g=>g.t===Fm[k].group); if (!g) groups.push(g = {t:Fm[k].group,f:[]}); g.f.push(k); }
   const steps = [{id:"photo",t:"Photo"},
-    {id:"plate",t:"Plate",h:"Check what was read",sub:"Compare each value with the plate. Tap a photo to zoom in.",f:plate,box:{t:"Specification",note:"Matched from the make and model number. Pick another if it is not right.",f:spec}},
+    {id:"plate",t:"Details",h:"Check the details",sub:"Compare each value with the plate. Tap a photo to zoom in.",f:plate,box:{t:"Specification",note:"Matched from the make and model number. Pick another if it is not right.",f:spec}},
     {id:"asset",t:"Asset",h:"What is it, and where?",sub:"The name is built for you from the asset type, service area, label and capacity.",f:asset},
     {id:"cond",t:"Condition",h:"What condition is it in?",sub:"Tap one in each row.",f:cond},
     {id:"maint",t:"Maintenance",h:"Maintenance",sub:"How it is maintained and who services it.",f:maint},
@@ -933,8 +932,12 @@ async function addFiles(fileList){
   if (!Store.idb && added.some(p=>p.local)) toast("Photos can't be kept on this device. Export before closing the page.");
   if (!cur.barcode) { const code = await detectBarcode(await Promise.all(added.map(p=>Store.photoBlob(p))));   // every photo is checked for a bar code
     if (code) { cur.barcode = code; aiFilled.add("barcode"); const asId = findAssetId(code); if (asId && !cur.id) { cur.id = asId; aiFilled.add("id"); aiWhy.id = "from the bar code"; } toast("Bar code read: "+code); } }
-  readNameplate();
+  if (reader==="online" && onlineOk()) {   // people often take several photos in a row: read them together, once
+    clearTimeout(readTimer); setAi({msg:"Photo saved. Reading starts when you stop taking photos…"});
+    readTimer = setTimeout(readNameplate, 2500);
+  } else readNameplate();
 }
+let readTimer = 0;
 /* ---------- reading the plate ---------- */
 let reader = "device"; try { reader = localStorage.getItem("pmbh-reader") || "device"; } catch(e) {}
 const onlineOk = () => !!onlineKey();
@@ -1211,7 +1214,7 @@ async function readDevice(){
     const un = (merged.unclear.includes("make") ? " The make is a guess." : "")+(merged.unclear.includes("model") ? " The model number was matched to the closest one already in AFM." : "");
     const miss = [!cur.id && "asset tag", !(cur.make && cur.model && cur.serial) && "nameplate"].filter(Boolean);
     const more = miss.length ? " Not found yet: "+miss.join(" and ")+". Take a closer photo of it to fill in more." : "";
-    setAi({retry:true, online:true, bad:!got.length && !texts.length, msg: got.length ? "Filled in: "+got.join(", ")+"."+un+" Check each against the plate."+more
+    setAi({retry:true, online:true, bad:!got.length && !texts.length, msg: got.length ? "Filled in: "+got.join(", ")+"."+un+" Check each against the photos."+more
       : (texts.length ? "Nothing new was found in these photos."+more+" You can also open the text below." : "No text could be read. Retake the photo closer, square on and out of glare.")});
   } catch(e) {
     ocrProgress = null;
@@ -1222,8 +1225,8 @@ async function readDevice(){
 /* --- reader 2: Online OCR. Photos are sent to an online vision model; needs a connection and a key held on this phone only. --- */
 const onlineKey = () => { try { return (localStorage.getItem("pmbh-ocrkey")||"").trim(); } catch(e) { return ""; } };
 const GAPI = "https://generativelanguage.googleapis.com/v1beta/";
-async function shrinkFor(blob, maxBytes){
-  const bmp = await createImageBitmap(blob); let side = 2400, q = .88, out = blob;
+async function shrinkFor(blob, maxBytes, maxSide){
+  const bmp = await createImageBitmap(blob); let side = maxSide || 2400, q = .85, out = blob;
   for (let i=0;i<7;i++) {
     const k = Math.min(1, side/Math.max(bmp.width,bmp.height)), c = document.createElement("canvas");
     c.width = Math.round(bmp.width*k); c.height = Math.round(bmp.height*k); c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
@@ -1296,7 +1299,7 @@ const parseJsonReply = txt => { let o = null; try { o = JSON.parse(txt); } catch
 const waitFor = (ms, signal) => new Promise((res,rej) => { const t = setTimeout(res, ms); signal.addEventListener("abort", () => { clearTimeout(t); rej({name:"AbortError"}); }, {once:true}); });
 async function callClaude(prompt, imgs, ctl, onBusy){
   const body = JSON.stringify({model:"claude-opus-5-5", max_tokens:16000,
-    output_config:{effort:"medium", format:{type:"json_schema", schema:OCR_SCHEMA}},
+    output_config:{effort:"low", format:{type:"json_schema", schema:OCR_SCHEMA}},   // reading a plate needs little reasoning; low is much quicker
     fallbacks:"default",   // if the request is declined, the API retries it on a suitable model by itself
     messages:[{role:"user", content:imgs.map(d => ({type:"image",source:{type:"base64",media_type:"image/jpeg",data:d}})).concat([{type:"text",text:prompt}])}]});
   let r = null, err = null;
@@ -1321,14 +1324,18 @@ async function callClaude(prompt, imgs, ctl, onBusy){
 async function callGoogle(prompt, imgs, ctl, onBusy){
   const models = await pickModel(ctl.signal);
   const parts = [{text:prompt}].concat(imgs.map(d => ({inline_data:{mime_type:"image/jpeg", data:d}})));
-  const call = m => fetch(GAPI+"models/"+m+":generateContent",{method:"POST",signal:ctl.signal,headers:{"Content-Type":"application/json","x-goog-api-key":onlineKey()},
-    body:JSON.stringify({contents:[{role:"user",parts}],generationConfig:{temperature:0,responseMimeType:"application/json"}})});
+  let noThinkOk = true;
+  const call = m => { const gc = {temperature:0,responseMimeType:"application/json"};
+    if (noThinkOk && /^gemini-2\.5-flash/.test(m)) gc.thinkingConfig = {thinkingBudget:0};   // 2.5 Flash thinks by default, which is slow
+    return fetch(GAPI+"models/"+m+":generateContent",{method:"POST",signal:ctl.signal,headers:{"Content-Type":"application/json","x-goog-api-key":onlineKey()},
+      body:JSON.stringify({contents:[{role:"user",parts}],generationConfig:gc})}); };
   // The service is sometimes overloaded for a few seconds: retry, then try the next model, before giving up.
   let r = null, lastErr = null;
   outer: for (const m of models) for (let attempt=0; attempt<2; attempt++) {
     r = await call(m);
     if (r.ok) break outer;
     let msg = ""; try { msg = ((await r.clone().json()).error||{}).message||""; } catch(e) {}
+    if (r.status===400 && noThinkOk && /thinking/i.test(msg)) { noThinkOk = false; attempt--; continue; }   // that model refused the setting: ask again without it
     const busy = r.status===503 || r.status===500 || /overloaded|high demand|unavailable/i.test(msg);
     lastErr = {code: busy ? "busy" : r.status===429 ? "quota" : (r.status===401 || r.status===403 || /api key/i.test(msg)) ? "key" : "api", message:msg};
     if (lastErr.code==="key") throw lastErr;
@@ -1348,7 +1355,11 @@ async function readOnline(){
   if (!onlineOk()) return openHelp();
   if (!Store.online()) return setAi({bad:true,retry:true,msg:"No connection. Use the on-phone reader now, and Online OCR when you have signal."});
   if (aiCtl) aiCtl.abort();
-  const ctl = aiCtl = new AbortController(), forKey = cur.key;
+  const ctl = aiCtl = new AbortController(), forKey = cur.key, t0 = Date.now();
+  let slow = false;
+  const tick = setInterval(() => { if (aiCtl!==ctl || !cur || cur.key!==forKey) return clearInterval(tick); const sec = Math.round((Date.now()-t0)/1000);
+    if (sec>=40) { slow = true; clearInterval(tick); ctl.abort(); return; }
+    const box = $("aistatus"), g = box && box.querySelector(".grow"); if (g && /^Online OCR is (reading|busy)/.test(g.textContent)) g.textContent = g.textContent.replace(/ \(\d+ s\)$/,"")+" ("+sec+" s)"; }, 1000);
   setAi({busy:true,msg:"Online OCR is reading the photos…",stop:true});
   try {
     const photos = byTag(cur.photos).slice(0,6);
@@ -1356,7 +1367,7 @@ async function readOnline(){
     if (!blobs.length) throw {code:"photo"};
     const T = await loadList("types");
     const prompt = promptFor(blobs.length, T.raw, "");
-    const imgs = []; for (const b of blobs) imgs.push(await toB64(await shrinkFor(b, 2500000)));
+    const imgs = []; for (const b of blobs) imgs.push(await toB64(await shrinkFor(b, 650000, 1800)));
     const onBusy = () => { if (cur && cur.key===forKey) setAi({busy:true,msg:"Online OCR is busy. Trying again…",stop:true}); };
     const out = keyService(onlineKey())==="claude" ? await callClaude(prompt, imgs, ctl, onBusy) : await callGoogle(prompt, imgs, ctl, onBusy);
     if (!cur || cur.key!==forKey) return;
@@ -1365,11 +1376,12 @@ async function readOnline(){
     const got = await applyRead(out, forKey); if (!got) return;
     const unclear = Array.isArray(out.unclear) ? out.unclear.filter(k => typeof k==="string" && KEYMAP[k] && typeof out[k]==="string" && out[k].trim()).map(k=>F[KEYMAP[k]] ? F[KEYMAP[k]].label.toLowerCase().replace(/,.*$/,"") : k) : [];
     const issue = typeof out.photo_issue==="string" ? out.photo_issue.trim() : "";
-    setAi({retry:true, bad:!got.length, msg: got.length ? "Filled in: "+got.join(", ")+"."+(unclear.length?" Not confident about: "+unclear.join(", ")+".":"")+(issue?" "+issue:"")+" Check each against the plate."
+    setAi({retry:true, bad:!got.length, msg: got.length ? "Filled in: "+got.join(", ")+"."+(unclear.length?" Not confident about: "+unclear.join(", ")+".":"")+(issue?" "+issue:"")+" Check each against the photos."
       : (issue || "Nothing new was found.")+" Retake the photo closer and square on, or type the details."});
   } catch(e) {
     if (!cur || cur.key!==forKey) return;
     const code = e && e.code;
+    if (e && e.name==="AbortError" && slow) { if (aiCtl===ctl) aiCtl = null; toast("Online OCR took too long. Reading on this phone instead."); return readDevice(); }
     if (e && e.name==="AbortError") return setAi({msg:"Stopped. Type the details or read again.",retry:true});
     if (code==="busy" || code==="quota" || !code) {   // do not leave the user stuck: read it on the phone instead
       if (aiCtl===ctl) aiCtl = null;
@@ -1378,7 +1390,7 @@ async function readOnline(){
     }
     setAi({bad:true,retry:true,msg: code==="key" ? "Your Online OCR key was not accepted. Check it in Setup." : code==="billing" ? "Your Online OCR account has no credit left. Add credit, or use the on-phone reader."
       : "Online OCR could not process the photos"+(e.message?": "+String(e.message).slice(0,140):".")+" Use the on-phone reader or type the details."});
-  } finally { if (aiCtl===ctl) aiCtl = null; }
+  } finally { clearInterval(tick); if (aiCtl===ctl) aiCtl = null; }
 }
 
 /* ---------- sheets ---------- */
@@ -1495,9 +1507,9 @@ function buildWorkbook(tpl, withPhotos){
   })));
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = tpl.headers.map(h => ({wch:Math.max(14,h.length+2)}));
-  const log = [["Row","Asset ID","Name","Asset type","Service area","Asset label","Capacity / energy / utility","Make","Model name","Model number","Serial number","Body or cardiac protected","Other nameplate details","Photo files","Captured","Still missing"]];
-  mine.forEach(([r,i],n) => log.push([String(n+1), r.id||"", r.name||"", r.atype||"", r.area||"", r.label||"", r.cap||"", r.make||"", r.modelName||"", r.model||"", r.serial||"", r.bodyProt||"", r.notes||"", withPhotos ? photoNames(r,i).map(x=>"Photos/"+x).join("; ") : (r.photos||[]).length+" photo(s) in the app", (r.createdAt||"").slice(0,16).replace("T"," "), missing(r).map(k=>Ft[k].label).join(", ")]));
-  const ws2 = XLSX.utils.aoa_to_sheet(log); ws2["!cols"] = [8,14,34,24,16,14,20,18,18,22,22,14,44,44,18,22].map(w=>({wch:w}));
+  const log = [["Row","Asset ID","Name","Asset type","Service area","Asset label","Capacity / energy / utility","Make","Model name","Model number","Serial number","Body or cardiac protected","Photo files","Captured","Still missing"]];
+  mine.forEach(([r,i],n) => log.push([String(n+1), r.id||"", r.name||"", r.atype||"", r.area||"", r.label||"", r.cap||"", r.make||"", r.modelName||"", r.model||"", r.serial||"", r.bodyProt||"", withPhotos ? photoNames(r,i).map(x=>"Photos/"+x).join("; ") : (r.photos||[]).length+" photo(s) in the app", (r.createdAt||"").slice(0,16).replace("T"," "), missing(r).map(k=>Ft[k].label).join(", ")]));
+  const ws2 = XLSX.utils.aoa_to_sheet(log); ws2["!cols"] = [8,14,34,24,16,14,20,18,18,22,22,14,44,18,22].map(w=>({wch:w}));
   const wb = XLSX.utils.book_new();
   const readme = XLSX.utils.aoa_to_sheet([
     ["THIS IS NOT THE FINAL UPLOAD FILE"],[""],
@@ -1566,7 +1578,7 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
-const APP_VERSION = "18 Nov 2026, build 13";
+const APP_VERSION = "18 Nov 2026, build 15";
 let installEvt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
