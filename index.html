@@ -302,9 +302,11 @@ section.grp .fields{padding:0 16px 16px}
       <div class="reader" id="tplpick" style="margin:0 0 14px"></div>
       <h2>Photograph the nameplate</h2>
       <div class="photos" id="photos"></div>
-      <div class="note" style="margin:4px 0 0">Take as many as you like. Each photo is read, so more photos fill in more of the form.</div>
-      <div class="shots" id="shots"></div>
-      <button type="button" class="linkb" id="btn-gal">Add photos from the gallery</button>
+      <div class="note" style="margin:4px 0 12px">Take as many as you like: the nameplate, the asset tag, labels, the bar code, the whole asset. The app reads every photo and works out the make, model, serial number, asset ID, label, bar code and manufacture date.</div>
+      <div class="row2">
+        <button type="button" class="btn primary" id="btn-cam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l1.5-2.5h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Take photo</button>
+        <button type="button" class="btn" id="btn-gal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4z"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4 4 3 3-2 4 3"/></svg>From gallery</button>
+      </div>
       <input type="file" id="in-cam" accept="image/*" capture="environment" hidden>
       <input type="file" id="in-gal" accept="image/*" multiple hidden>
       <div class="reader" id="reader"></div>
@@ -333,9 +335,9 @@ section.grp .fields{padding:0 16px 16px}
 // AFM field name -> short key used in saved assets (anything not listed keeps its AFM field name)
 const KEYS = {triIdTX:"id",triNameTX:"name",triSerialNumTX:"serial",triBarCodeEntryTX:"barcode",triPrimaryOrganizationTX:"org",cstOperatorTX:"operator",triPrimaryLocationTX:"location",cstEquipmentPositionTX:"position",cstFixedORMobileLI:"fixed",triSpecNameTX:"spec",triBuildingSystemCL:"cls",cstAssetOwnershipStatusCL:"ownStatus",cstAssetOwnershipTypeCL:"ownType",triActiveStartDA:"inService",cstManufactureDateDA:"mfgDate",cstWarrantyStartDateDA:"warrStart",cstWarrantyExpiresDA:"warrEnd",triPONumTX:"po",triPurchaseCostNU:"cost",cstSupplierTX:"supplier",triLifeExpectancyDU:"life",cstAssetCriticalityLI:"criticality",cstOperatingEnvironmentLI:"env",cstAssetUtilisationLI:"util",triConditionLI:"condition",cstConditionDA:"assessDate",cstConditionAssessmentCommentsTX:"comments",triCurrentReplacementValueNU:"replValue",cstMaintenanceTypeLI:"maintType",triMaintenancePriorityCL:"maintPriority",cstMaintenanceStrategyLI:"maintStrategy",cstServiceAgentTX:"agent",cstDCParentRecordIdTX:"parent"};
 const SKIP = new Set(["cstDCRecordIdTX"]);
-const HINT = {id:"The hospital asset number on the tag",parent:"The asset ID of the asset this one belongs to or is fed from, e.g. the switchboard for a distribution board. Leave blank if there is none.",life:"Type it any way, e.g. 10 years, 15 yrs, 6 months, one year",position:"e.g. plant room north wall, roof above theatre 2",name:"Built as asset type - service area - asset label - capacity, following the HI naming guide. The brand is not part of the name."};
+const HINT = {id:"The number on the hospital asset tag",parent:"The asset ID of the asset this one belongs to or is fed from, e.g. the switchboard for a distribution board. Leave blank if there is none.",life:"Type it any way, e.g. 10 years, 15 yrs, 6 months, one year",position:"e.g. plant room north wall, roof above theatre 2",name:"Built as asset type - service area - asset label - capacity, following the HI naming guide. The brand is not part of the name."};
 const SCALE = {criticality:[1,3,4,5],env:[1,3,5],util:[0,0,0],condition:[1,2,3,4,5]};
-const LABELS = {parent:"Parent asset ID",warrStart:"Warranty start date",warrEnd:"Warranty expiry date",id:"Asset ID",life:"Life expectancy",cstDCAssessedByTX:"Assessed by",fixed:"Fixed or mobile?",barcode:"Bar code",spec:"Specification name",operator:"Operator (cost code)",serial:"Serial number",location:"Primary location"};
+const LABELS = {id:"Asset ID (asset tag)",parent:"Parent asset ID",warrStart:"Warranty start date",warrEnd:"Warranty expiry date",life:"Life expectancy",cstDCAssessedByTX:"Assessed by",fixed:"Fixed or mobile?",barcode:"Bar code",spec:"Specification name",operator:"Operator (cost code)",serial:"Serial number",location:"Primary location"};
 const CAPTURE = {   // captured for every category; kept in the capture log sheet, not in the data load columns
   atype:{label:"Asset type",type:"pick",src:"types"},
   area:{label:"Service area",type:"text",hint:"Ward, department or block, e.g. ICU, West Block"},
@@ -782,27 +784,17 @@ function renderStepper(){
     const n = el("span",{class:"n"}); if (state==="done" && i!==step) n.insertAdjacentHTML("beforeend", UI.check.replace("<svg","<svg width=\"16\" height=\"16\"")); else n.textContent = String(i+1);
     return el("button",{type:"button",class:"stepb"+(i===step?" on":"")+(state?" "+state:""),"aria-current":i===step?"step":null,"aria-label":"Step "+(i+1)+": "+st.t+(state==="need"?", needs a required answer":state==="done"?", has answers":""),onclick:()=>goStep(i)}, n, st.t); }));
 }
-let pendingTag = "plate";
 function renderPhotos(){
   const box = $("photos"); box.replaceChildren();
   cur.photos.forEach((p,i) => {
     const im = el("img",{alt:"Photo "+(i+1)+". Tap to zoom",style:"cursor:zoom-in",onclick:()=>openZoom(p,i)}); Store.photoUrl(p).then(u => { if (u) im.src = u; });
-    box.append(el("div",{class:"photo"}, im, el("span",{class:"tag",text:(SHOTS[p.tag]||["","Other"])[1]}), el("button",{type:"button","aria-label":"Remove photo "+(i+1),text:"×",onclick:async()=>{
+    box.append(el("div",{class:"photo"}, im, el("button",{type:"button","aria-label":"Remove photo "+(i+1),text:"×",onclick:async()=>{
       if (!(await confirmSheet("Remove this photo?","It is taken out of this asset.","Remove",true))) return;
       cur.photos.splice(i,1); dirty = true; renderPhotos(); ocrCache.delete(Store.pkey(p));
       if (curAdded.includes(p)) { curAdded = curAdded.filter(x=>x!==p); Store.delPhoto(p); } else (cur._removed = cur._removed||[]).push(p);
     }})));
   });
   box.hidden = !cur.photos.length;
-  const shots = $("shots"); shots.replaceChildren();
-  for (const [tag,[icon,title,sub]] of Object.entries(SHOTS)) {
-    const n = tag==="barcode" ? (cur.barcode ? 1 : 0) : cur.photos.filter(p=>p.tag===tag).length;
-    const b = el("button",{type:"button",class:"shot"+(tag==="plate"?" main":"")+(n?" has":""),onclick:()=>{ if (tag==="barcode") return openScanner("barcode"); pendingTag = tag; $("in-cam").click(); }});
-    b.insertAdjacentHTML("beforeend", icon);
-    b.append(el("b",{text:title}), el("span",{text: tag==="barcode" && cur.barcode ? cur.barcode : (n ? (n===1?"1 photo. Tap to add another":n+" photos. Tap to add another") : sub)}));
-    if (n) b.append(el("span",{class:"tick",text:tag==="barcode"?"✓":String(n)}));
-    shots.append(b);
-  }
   if ($("stepper").children.length) { renderStepper(); if (STEPS[step].id==="photo") $("btn-next").textContent = (cur.photos.length || cur.barcode) ? "Next: "+STEPS[1].t : "Skip photos"; }
 }
 function fieldNode(k){
@@ -928,18 +920,19 @@ function openZoom(p, i){
     const u = await Store.photoUrl(p); if (u) im.src = u;
   });
 }
-async function addFiles(fileList, tag){
+async function addFiles(fileList){
   const files = [...fileList].filter(f=>f.type.startsWith("image/")||!f.type); if (!files.length) return;
   setAi({busy:true,msg:"Saving photo…"});
   const added = [];
   for (const f of files) {
-    try { const b = await shrink(f); const p = await Store.addPhoto(b); p.tag = tag; cur.photos.push(p); curAdded.push(p); added.push(p); dirty = true; }
+    try { const b = await shrink(f); const p = await Store.addPhoto(b); cur.photos.push(p); curAdded.push(p); added.push(p); dirty = true; }
     catch(e) { toast("That file could not be read as a photo."); }
   }
   renderPhotos();
   if (!added.length) return setAi(null);
   if (!Store.idb && added.some(p=>p.local)) toast("Photos can't be kept on this device. Export before closing the page.");
-  if (tag==="barcode" || tag==="label") { const code = await detectBarcode(await Promise.all(added.map(p=>Store.photoBlob(p)))); if (code && !cur.barcode) { cur.barcode = code; aiFilled.add("barcode"); toast("Bar code read: "+code); } }
+  if (!cur.barcode) { const code = await detectBarcode(await Promise.all(added.map(p=>Store.photoBlob(p))));   // every photo is checked for a bar code
+    if (code) { cur.barcode = code; aiFilled.add("barcode"); const asId = findAssetId(code); if (asId && !cur.id) { cur.id = asId; aiFilled.add("id"); aiWhy.id = "from the bar code"; } toast("Bar code read: "+code); } }
   readNameplate();
 }
 /* ---------- reading the plate ---------- */
@@ -1023,7 +1016,7 @@ function openScanner(k){
     const video = el("video",{playsinline:true,muted:true,autoplay:true}), msg = el("div",{class:"note",role:"status",text:"Starting the camera…"});
     const torch = el("button",{type:"button",class:"btn",hidden:true,text:"Torch"});
     body.append(el("div",{class:"scan"}, video, el("div",{class:"aim"})), msg,
-      el("div",{class:"row2"}, torch, el("button",{type:"button",class:"btn",text:"Take a photo instead",onclick:()=>{ close(); pendingTag = "barcode"; $("in-cam").click(); }})));
+      el("div",{class:"row2"}, torch, el("button",{type:"button",class:"btn",text:"Take a photo instead",onclick:()=>{ close(); $("in-cam").click(); }})));
     try { stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1920},height:{ideal:1080}},audio:false}); }
     catch(e) { msg.textContent = "The camera could not be opened. Allow camera access for this app, or take a photo of the bar code instead."; return; }
     if (!alive) return stop();
@@ -1150,7 +1143,7 @@ function parsePlate(words, dict){
     if (!best || sc>best.sc) best = {sc, e};
   }
   if (best) out.make = best.e.name;
-  else { const big = words.filter(w => /^[A-Za-z][A-Za-z&\-]{2,}$/.test(clean(w.t)) && !STOP.test(clean(w.t))).sort((a,b)=>(b.y1-b.y0)-(a.y1-a.y0))[0];
+  else if (RE_SERIAL.test(text.toUpperCase()) || RE_MODEL.test(text.toUpperCase())) { const big = words.filter(w => /^[A-Za-z][A-Za-z&\-]{2,}$/.test(clean(w.t)) && !STOP.test(clean(w.t))).sort((a,b)=>(b.y1-b.y0)-(a.y1-a.y0))[0];
     if (big) { out.make = clean(big.t); out.unclear.push("make"); } }
   // model: prefer a model AFM already holds for that make, then a labelled value
   const labelled = valueAfter(RE_MODEL, true) || valueAfter(RE_TYPE, true);
@@ -1181,7 +1174,7 @@ function parsePlate(words, dict){
   return out;
 }
 const ocrCache = new Map();   // photo -> what was read from it, so adding a photo only reads the new one
-const byTag = ps => ps.slice().sort((a,b) => (["plate","label","asset","other"].indexOf(a.tag||"other")) - (["plate","label","asset","other"].indexOf(b.tag||"other")));
+const byTag = ps => ps.slice();
 async function readDevice(){
   if (!cur || !cur.photos.length) return;
   if (aiCtl) aiCtl.abort();
@@ -1205,16 +1198,19 @@ async function readDevice(){
       }
       const res = ocrCache.get(key);
       if (res.text) texts.push(res.text);
-      for (const k of ["make","model_name","model","serial","manufacture_date","details","asset_id","asset_label","capacity","asset_type"]) if (!merged[k] && res[k]) { merged[k] = res[k]; if (res.unclear.includes(k)) merged.unclear.push(k); }
     }
+    // the photo with the most legible text is most likely the nameplate, so its values win
+    const results = photos.map(p => ocrCache.get(Store.pkey(p))).filter(Boolean).sort((a,b) => b.strong-a.strong);
+    for (const res of results) for (const k of ["make","model_name","model","serial","manufacture_date","details","asset_id","asset_label","capacity","asset_type"]) if (!merged[k] && res[k]) { merged[k] = res[k]; if (res.unclear.includes(k)) merged.unclear.push(k); }
     ocrProgress = null;
     merged.model_number = merged.model; delete merged.model;
-    if (!cur.barcode) merged.barcode = await detectBarcode(await Promise.all(photos.filter(p=>p.tag==="barcode"||p.tag==="label"||p.tag==="other").map(p=>Store.photoBlob(p))));
+    if (!cur.barcode) merged.barcode = await detectBarcode(await Promise.all(photos.map(p=>Store.photoBlob(p))));
     if (!cur || cur.key!==forKey) return;
     $("rawpre").textContent = texts.join("\n\n"); $("rawtext").hidden = !texts.length;
     const got = await applyRead(merged, forKey); if (!got) return;
     const un = (merged.unclear.includes("make") ? " The make is a guess." : "")+(merged.unclear.includes("model") ? " The model number was matched to the closest one already in AFM." : "");
-    const more = cur.photos.some(p=>p.tag==="asset") && cur.photos.some(p=>p.tag==="label") ? "" : " Add a photo of the "+[!cur.photos.some(p=>p.tag==="asset")&&"whole asset", !cur.photos.some(p=>p.tag==="label")&&"label or tag"].filter(Boolean).join(" and the ")+" to fill in more.";
+    const miss = [!cur.id && "asset tag", !(cur.make && cur.model && cur.serial) && "nameplate"].filter(Boolean);
+    const more = miss.length ? " Not found yet: "+miss.join(" and ")+". Take a closer photo of it to fill in more." : "";
     setAi({retry:true, online:true, bad:!got.length && !texts.length, msg: got.length ? "Filled in: "+got.join(", ")+"."+un+" Check each against the plate."+more
       : (texts.length ? "Nothing new was found in these photos."+more+" You can also open the text below." : "No text could be read. Retake the photo closer, square on and out of glare.")});
   } catch(e) {
@@ -1260,7 +1256,7 @@ async function pickModel(signal){
 }
 const promptFor = (nFull, types, tags) => `You are reading photos taken during an asset validation at an Australian public hospital (NSW Health). The assets are building and facility plant (air handling units, fan coil units, chillers, split systems, pumps, boilers, hot water units, thermostatic mixing valves, switchboards and distribution boards, generators, UPS, fire panels, extinguishers, hose reels, lifts, medical gas plant, kitchen and laundry equipment) and some medical equipment (patient scales, beds, patient lifters, sterilisers, examination tables).
 
-There are ${nFull} photos of one asset, in this order: ${tags}. Use all of them together: read the nameplate for make, model and serial; use the whole-asset photo to decide what the equipment is; read the label or tag photo for the asset ID and local label.
+There are ${nFull} photos of one asset, in no particular order. Work out what each photo shows (the nameplate, an asset tag, a local label, a bar code, the whole asset or a detail) and use all of them together: the nameplate gives make, model and serial; the whole asset shows what the equipment is; the asset tag gives the asset ID; a local label gives the asset label.
 
 How these plates are laid out:
 - Model may be labelled MODEL, MOD, MODEL NO, M/N, TYPE, TYP, CAT NO, PART NO, or by the boxed symbol REF. Serial may be labelled SERIAL, SER NO, S/N, SN, S.No, MFG NO, F.No, Fabr.Nr, or by the boxed symbol SN. On medical device labels a factory icon marks the manufacturer and a factory icon with a date marks the date of manufacture. LOT is a batch, not a serial.
@@ -1359,7 +1355,7 @@ async function readOnline(){
     const blobs = (await Promise.all(photos.map(p=>Store.photoBlob(p)))).filter(Boolean);
     if (!blobs.length) throw {code:"photo"};
     const T = await loadList("types");
-    const prompt = promptFor(blobs.length, T.raw, photos.map((p,i)=>"photo "+(i+1)+": "+({plate:"nameplate",asset:"whole asset",label:"label or tag",barcode:"bar code"}[p.tag]||"other")).join(", "));
+    const prompt = promptFor(blobs.length, T.raw, "");
     const imgs = []; for (const b of blobs) imgs.push(await toB64(await shrinkFor(b, 2500000)));
     const onBusy = () => { if (cur && cur.key===forKey) setAi({busy:true,msg:"Online OCR is busy. Trying again…",stop:true}); };
     const out = keyService(onlineKey())==="claude" ? await callClaude(prompt, imgs, ctl, onBusy) : await callGoogle(prompt, imgs, ctl, onBusy);
@@ -1481,7 +1477,7 @@ async function deleteCur(){
 
 /* ---------- export ---------- */
 const safe = s => String(s||"").replace(/[^A-Za-z0-9._-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40);
-const photoNames = (r,i) => (r.photos||[]).map((p,n) => String(i+1).padStart(3,"0")+"_"+(safe(r.id||r.barcode||r.serial||r.name)||"asset")+"_"+(n+1)+"_"+(p.tag||"photo")+".jpg");
+const photoNames = (r,i) => (r.photos||[]).map((p,n) => String(i+1).padStart(3,"0")+"_"+(safe(r.id||r.barcode||r.serial||r.name)||"asset")+"_"+(n+1)+".jpg");
 const usedTemplates = () => PACK.templates.filter(t => records.some(r => defsOf(r).tpl.id===t.id));
 const xlsxName = t => "PMBH capture - "+t.title+" - "+today()+" - NOT the upload file.xlsx";
 function buildWorkbook(tpl, withPhotos){
@@ -1561,7 +1557,7 @@ function openExport(){
     b1.onclick = () => doExport("zip", b1, status); b2.onclick = () => doExport("xlsx", b2, status);
     body.append(
       el("div",{class:"opt"}, el("h3",{text:"Excel and photos"}), el("p",{text:records.length+(records.length===1?" asset":" assets")+" and "+nPhotos+(nPhotos===1?" photo":" photos")+", in one ZIP file:"}),
-        el("pre",{class:"tree",text:usedTemplates().map(t=>"├─ "+t.title+" (Excel)\n").join("")+"└─ Photos/\n   ├─ 001_<asset ID>_1_plate.jpg\n   └─ …"}), b1),
+        el("pre",{class:"tree",text:usedTemplates().map(t=>"├─ "+t.title+" (Excel)\n").join("")+"└─ Photos/\n   ├─ 001_<asset ID>_1.jpg\n   └─ …"}), b1),
       el("div",{class:"opt"}, el("h3",{text:"Excel only"}), el("p",{text:(usedTemplates().length>1 ? "One Excel file per asset category, in one ZIP file." : "One Excel file.")+" Each opens on a READ ME sheet; the data sheet to copy from is the next tab."}), b2),
       status,
       el("div",{class:"opt"}, el("h3",{text:"Clear the list"}), el("p",{text:"Once the file is safely on your PC, remove these assets and photos from this phone to start the next batch."}),
@@ -1570,7 +1566,7 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
-const APP_VERSION = "18 Nov 2026, build 11";
+const APP_VERSION = "18 Nov 2026, build 12";
 let installEvt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
@@ -1636,9 +1632,8 @@ $("btn-prev").onclick = () => step===0 ? leaveEdit() : goStep(step-1);
 $("btn-next").onclick = () => step===STEPS.length-1 ? saveCur() : goStep(step+1);
 let qT; $("q").addEventListener("input", e => { clearTimeout(qT); qT = setTimeout(() => { query = e.target.value; renderList(); }, 150); });
 $("btn-save").onclick = saveCur; $("btn-delete").onclick = deleteCur;
-$("btn-gal").onclick = () => $("in-gal").click();
-$("in-cam").addEventListener("change", e => { const fl = [...e.target.files]; e.target.value = ""; addFiles(fl, pendingTag); });
-$("in-gal").addEventListener("change", e => { const fl = [...e.target.files]; e.target.value = ""; addFiles(fl, "other"); });
+$("btn-cam").onclick = () => $("in-cam").click(); $("btn-gal").onclick = () => $("in-gal").click();
+for (const id of ["in-cam","in-gal"]) $(id).addEventListener("change", e => { const fl = [...e.target.files]; e.target.value = ""; addFiles(fl); });
 
 async function loadRecords(){
   const b = $("banner");
