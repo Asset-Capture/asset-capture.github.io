@@ -1005,6 +1005,7 @@ function setAi(s){
   if (s.busy) box.append(el("span",{class:"spin"}));
   box.append(el("span",{class:"grow",text:s.msg}));
   if (s.stop) box.append(el("button",{type:"button",text:"Stop",onclick:()=>aiCtl&&aiCtl.abort()}));
+  if (s.stopDevice) box.append(el("button",{type:"button",text:"Stop",onclick:()=>{ stopRead = true; setAi({busy:true,msg:"Stopping… keeping what was found so far."}); }}));
   if (s.retry) box.append(el("button",{type:"button",text:"Read again",onclick:readNameplate}));
   if (s.online && onlineOk()) box.append(el("button",{type:"button",text:"Try Online OCR",onclick:readOnline}));
 }
@@ -1121,8 +1122,9 @@ function getOcr(){
   ocrP = (async () => {
     if (typeof Tesseract==="undefined") await loadScript("ocr/tesseract.min.js");
     const base = new URL("ocr/", document.baseURI).href;
-    const r = await fetch("ocr/eng-lang.json"); if (!r.ok) throw new Error("language data");
-    const data = Uint8Array.from(atob((await r.json())[0]), ch => ch.charCodeAt(0));
+    let data = null;
+    try { const r = await fetch("ocr/eng-lang.bin"); if (r.ok) data = new Uint8Array(await r.arrayBuffer()); } catch(e) {}
+    if (!data || data.length < 100000) { const r = await fetch("ocr/eng-lang.json"); if (!r.ok) throw new Error("language data"); const b = atob((await r.json())[0]); data = new Uint8Array(b.length); for (let i=0;i<b.length;i++) data[i] = b.charCodeAt(i); }
     const w = await timeout(Tesseract.createWorker([{code:"eng",data}], 1, {workerPath:base+"worker.min.js", corePath:base, workerBlobURL:false, cacheMethod:"none",
       logger:m => { if (ocrProgress && m.status==="recognizing text") ocrProgress(m.progress); }, errorHandler:()=>{}}), 90000);
     await w.setParameters({tessedit_pageseg_mode:"11", preserve_interword_spaces:"1"});
@@ -1274,19 +1276,23 @@ function parsePlate(words, dict){
   return out;
 }
 // Second, zoomed read of the serial and model: crop the strip beside each label, enlarge it, and read it as a single line.
-async function zoomRead(w, canvas, res){
+async function zoomRead(w, canvas, res, blob){
+  // crop from the full-resolution photo when the read was made on an upright, reduced copy
+  let src = canvas, sc = 1;
+  try { const bmp = await createImageBitmap(blob); const r = bmp.width/canvas.width; if (Math.abs(bmp.height/canvas.height - r) < 0.02 && r > 1.05) { src = bmp; sc = r; } } catch(e) {}
   for (const [field, re] of [["serial", RE_SERIAL], ["model", RE_MODEL]]) {
     const a = res._anchors && res._anchors[re.source]; if (!a || !canvas) continue;
     const h = Math.max(8, a.y1-a.y0), x0 = Math.max(0, a.x1+2), y0 = Math.max(0, a.y0-h*.55), x1 = Math.min(canvas.width, a.x1+h*24), y1 = Math.min(canvas.height, a.y1+h*.55);
     if (x1-x0 < h*2) continue;
-    const k = Math.min(4, Math.max(1, 64/h)), c = document.createElement("canvas"); c.width = Math.round((x1-x0)*k); c.height = Math.round((y1-y0)*k);
-    const g = c.getContext("2d"); g.imageSmoothingQuality = "high"; g.fillStyle = "#fff"; g.fillRect(0,0,c.width,c.height); g.drawImage(canvas, x0, y0, x1-x0, y1-y0, 0, 0, c.width, c.height);
+    const k = Math.min(4, Math.max(1, 64/h)), c0 = document.createElement("canvas"); c0.width = Math.round((x1-x0)*k); c0.height = Math.round((y1-y0)*k);
+    const g = c0.getContext("2d"); g.imageSmoothingQuality = "high"; g.fillStyle = "#fff"; g.fillRect(0,0,c0.width,c0.height); g.drawImage(src, x0*sc, y0*sc, (x1-x0)*sc, (y1-y0)*sc, 0, 0, c0.width, c0.height);
+    const c = sc>1 ? await prep(c0, false, Math.max(c0.width, c0.height)) : c0;   // the raw photo needs the same contrast clean-up
     await w.setParameters({tessedit_pageseg_mode:"7", tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/. #:"});
     let ws = []; try { ws = wordsOf((await w.recognize(c, {}, {text:true,blocks:true})).data); } finally { await w.setParameters({tessedit_pageseg_mode:"11", tessedit_char_whitelist:""}); }
     const toks = ws.map(x => ({t:x.t.replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g,""), c:x.c})).filter(x => x.t && !/^(NO|N0|NUMBER|#)$/.test(x.t));
     if (!toks.length) continue;
     if (field==="serial") {
-      const i = toks.findIndex(x => /\d/.test(x.t) && x.t.length>=4); if (i<0) continue;
+      const i = toks.findIndex(x => /\d/.test(x.t) && x.t.length>=5 && !/^\d+(\.\d+)?(V|A|W|HZ|KW|KVA|KG|L|MM|KPA|MPA|RPM)$/.test(x.t)); if (i<0) continue;
       let v = toks[i].t, c2 = toks[i].c; if (/^\d+$/.test(v) && toks[i+1] && /^[A-Z]{1,2}$/.test(toks[i+1].t) && !/^(V|A|HZ|KW|W|KG|L|PH)$/.test(toks[i+1].t)) v += toks[i+1].t;
       if (c2>=70 && (!res.serial || (c2 > (res._serialConf||0)+5 && v!==res.serial))) { res.serial = v; res._serialConf = c2; }
       else if (!res.serial && c2>=50) { res.serial = v; res.unclear.push("serial"); }
@@ -1302,8 +1308,10 @@ async function zoomRead(w, canvas, res){
 }
 const ocrCache = new Map();   // photo -> what was read from it, so adding a photo only reads the new one
 const byTag = ps => ps.slice();
+let stopRead = false;
 async function readDevice(){
   if (!cur || !cur.photos.length) return;
+  stopRead = false;
   if (aiCtl) aiCtl.abort();
   const forKey = cur.key, first = !ocrP, photos = byTag(cur.photos).slice(0,8);
   setAi({busy:true,msg: first ? "Getting the on-phone reader ready. The first time takes a little longer…" : "Reading on this phone…"});
@@ -1313,29 +1321,32 @@ async function readDevice(){
     let n = 0;
     for (const p of photos) {
       const key = Store.pkey(p);
-      if (!ocrCache.has(key)) {
+      if (!ocrCache.has(key) && !stopRead) {
         n++; const blob = await Store.photoBlob(p); if (!blob) continue;
-        ocrProgress = pr => { if (cur && cur.key===forKey) setAi({busy:true,msg:"Reading on this phone… photo "+n+" of "+todo.length+", "+Math.round(pr*100)+"%"}); };
-        const firstCanvas = await prep(blob,false);
+        ocrProgress = pr => { if (cur && cur.key===forKey && !stopRead) setAi({busy:true,stopDevice:true,msg:"Reading on this phone… photo "+n+" of "+todo.length+", "+Math.round(pr*100)+"%"}); };
+        const t0 = performance.now(), firstCanvas = await prep(blob,false,1800);
         let res = parsePlate(wordsOf((await w.recognize(firstCanvas, {}, {text:true,blocks:true})).data), dict);
         // weak read: try light-on-dark, then a smaller copy (very large lettering, as on a close-up label, reads badly at full size)
         // keep trying while the serial or model is missing: tables with drawn boxes and very large lettering often need another pass
         const score = r => r.strong + (r.serial?20:0) + (r.model?10:0) + (r.make?3:0);
         let bestCanvas = firstCanvas;
-        const passes = [[false,2000,"11",{flat:true}],[false,1600,"6"],[true,2400,"11"],[false,1400,"11"],[false,900,"11"],[false,1100,"6"],[false,700,"11"],[false,1600,"11",{rot:90}],[false,1600,"11",{rot:270}],[true,900,"11"]];
+        const firstMs = performance.now()-t0, budget = Math.min(9000, Math.max(3500, firstMs*2.5));   // extra attempts get a few seconds, scaled to this phone's speed
+        const tagPhoto = () => (res.asset_id || res.asset_label) && !(res._anchors && (res._anchors[RE_SERIAL.source] || res._anchors[RE_MODEL.source]));
+        const passes = [[false,1800,"11",{flat:true}],[false,1500,"6"],[false,1400,"11",{rot:90}],[false,1400,"11",{rot:270}],[false,900,"11"],[true,1800,"11"],[false,700,"11"]];
         for (const [inv, side, psm, opt] of passes) {
           if (res.strong>=3 && res.serial && res.model) break;
+          if (stopRead || tagPhoto() || performance.now()-t0-firstMs > budget) break;
           if (opt && opt.rot && (res.serial || res.model || res.make)) continue;   // only turn the photo when nothing useful was read upright
           if (psm!=="11") await w.setParameters({tessedit_pageseg_mode:psm});
           let r2, cv; try { cv = await prep(blob,inv,side,opt); r2 = parsePlate(wordsOf((await w.recognize(cv, {}, {text:true,blocks:true})).data), dict); } finally { if (psm!=="11") await w.setParameters({tessedit_pageseg_mode:"11"}); }
           if (score(r2)>score(res)) { for (const k of ["make","model","model_name","serial","manufacture_date"]) if (!r2[k] && res[k]) r2[k] = res[k]; res = r2; bestCanvas = cv; }
           else for (const k of ["make","model","model_name","serial","manufacture_date","asset_id","asset_label","capacity","asset_type"]) if (!res[k] && r2[k]) res[k] = r2[k];
         }
-        try { await zoomRead(w, bestCanvas, res); } catch(e) {}
+        try { await zoomRead(w, bestCanvas, res, blob); } catch(e) {}
         ocrCache.set(key, res);
         if (!cur || cur.key!==forKey) return;
       }
-      const res = ocrCache.get(key);
+      const res = ocrCache.get(key); if (!res) continue;
       if (res.text) texts.push(res.text);
     }
     // the photo with the most legible text is most likely the nameplate, so its values win
@@ -1722,7 +1733,7 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
-const APP_VERSION = "18 Nov 2026, build 25";
+const APP_VERSION = "18 Nov 2026, build 26";
 let installEvt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
