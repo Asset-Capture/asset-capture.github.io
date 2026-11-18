@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PMBH Asset Capture</title>
+<title>Asset Capture</title>
 <meta name="theme-color" content="#17303d">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -275,7 +275,7 @@ section.grp .fields{padding:0 16px 16px}
 <div id="view-list" hidden>
   <header class="top"><div class="wrap row">
     <img src="icon-192.png" alt="" class="logo">
-    <div class="grow"><h1>Asset Capture</h1><p>PMBH assets · AFMO data load</p></div>
+    <div class="grow"><h1>Asset Capture</h1><p>Building and facility assets · AFMO data load</p></div>
     <button type="button" class="iconb" id="btn-help" aria-label="Setup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg></button>
   </div></header>
   <main class="wrap">
@@ -1479,7 +1479,7 @@ async function deleteCur(){
 const safe = s => String(s||"").replace(/[^A-Za-z0-9._-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40);
 const photoNames = (r,i) => (r.photos||[]).map((p,n) => String(i+1).padStart(3,"0")+"_"+(safe(r.id||r.barcode||r.serial||r.name)||"asset")+"_"+(n+1)+".jpg");
 const usedTemplates = () => PACK.templates.filter(t => records.some(r => defsOf(r).tpl.id===t.id));
-const xlsxName = t => "PMBH capture - "+t.title+" - "+today()+" - NOT the upload file.xlsx";
+const xlsxName = t => "Asset Capture - "+t.title+" - "+today()+" - NOT the upload file.xlsx";
 function buildWorkbook(tpl, withPhotos){
   const Ft = defsFor(tpl.id).F, colKey = {}; for (const [k,f] of Object.entries(Ft)) if (f.col) colKey[f.col] = k;
   const mine = records.map((r,i)=>[r,i]).filter(([r]) => defsOf(r).tpl.id===tpl.id);
@@ -1501,7 +1501,7 @@ function buildWorkbook(tpl, withPhotos){
   const wb = XLSX.utils.book_new();
   const readme = XLSX.utils.aoa_to_sheet([
     ["THIS IS NOT THE FINAL UPLOAD FILE"],[""],
-    ["It was saved by the PMBH Asset Capture app on "+today()+". "+mine.length+" "+tpl.title+" asset(s)."],[""],
+    ["It was saved by the Asset Capture app on "+today()+". "+mine.length+" "+tpl.title+" asset(s)."],[""],
     ["To load these assets into AFM:"],
     ["1. Open the AFMO "+tpl.title+" data load template (.xlsm) on your PC."],
     ["2. In this file, open the sheet “"+tpl.sheet+"” and copy every row under the header row."],
@@ -1526,14 +1526,14 @@ async function doExport(kind, btn, status){
     const used = usedTemplates();
     if (kind==="xlsx" && used.length===1) { blob = buildWorkbook(used[0], false); name = xlsxName(used[0]); }
     else if (kind==="xlsx") { const zip = new JSZip(); for (const t of used) zip.file(xlsxName(t), buildWorkbook(t, false));
-      blob = await zip.generateAsync({type:"blob",compression:"DEFLATE",mimeType:"application/zip"}); name = "PMBH capture - "+today()+" - Excel - NOT the upload file.zip"; }
+      blob = await zip.generateAsync({type:"blob",compression:"DEFLATE",mimeType:"application/zip"}); name = "Asset Capture - "+today()+" - Excel - NOT the upload file.zip"; }
     else {
       const zip = new JSZip(); for (const t of used) zip.file(xlsxName(t), buildWorkbook(t, true));
       const total = records.reduce((n,r)=>n+(r.photos||[]).length,0); let done = 0;
       for (let i=0;i<records.length;i++) { const names = photoNames(records[i],i);
         for (let n=0;n<names.length;n++) { status.textContent = "Collecting photo "+(++done)+" of "+total+"…"; const b = await Store.photoBlob(records[i].photos[n]); if (b) zip.file("Photos/"+names[n], b); else lost++; } }
       status.textContent = "Packing…";
-      blob = await zip.generateAsync({type:"blob",compression:"STORE",mimeType:"application/zip"}); name = "PMBH capture - "+today()+" - with photos - NOT the upload file.zip";
+      blob = await zip.generateAsync({type:"blob",compression:"STORE",mimeType:"application/zip"}); name = "Asset Capture - "+today()+" - with photos - NOT the upload file.zip";
     }
     status.textContent = "";
     await saveFile(name, blob);
@@ -1566,7 +1566,7 @@ function openExport(){
           records = left; renderList(); toast(left.length ? left.length+" assets could not be deleted. Try again." : "List cleared."); }})));
   });
 }
-const APP_VERSION = "18 Nov 2026, build 12";
+const APP_VERSION = "18 Nov 2026, build 13";
 let installEvt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (!$("view-list").hidden) renderList(); });
